@@ -76,7 +76,7 @@ st.markdown("""
     .metric-card {
         background-color: #1E272C; border: 1px solid #37474F; border-radius: 12px;
         padding: 15px 15px; text-align: center; box-shadow: 0 6px 12px rgba(0,0,0,0.3);
-        height: 320px; /* ÉP CHIỀU CAO CỐ ĐỊNH CHO 2 Ô BẰNG NHAU */
+        height: 320px;
         display: flex; flex-direction: column;
         margin-bottom: 15px; transition: transform 0.2s;
     }
@@ -101,7 +101,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Khởi tạo Session State để lưu kết quả phân tích
+# Khởi tạo Session State
 if 'analysis_done' not in st.session_state:
     st.session_state['analysis_done'] = False
 if 'results' not in st.session_state:
@@ -195,16 +195,14 @@ with col_main:
     with st.form(key='search_form'):
         f_col1, f_col2 = st.columns([2, 1])
         with f_col1:
-            ticker_input = st.text_input("Mã cổ phiếu:", placeholder="VD: HPG, VNM...").upper().strip()
+            ticker_input = st.text_input("Mã cổ phiếu:", placeholder="VD: HPG, CEO...").upper().strip()
         with f_col2:
             sl_input = st.number_input("SL mong muốn (%):", min_value=0.0, max_value=20.0, value=7.0, step=0.1, format="%.1f")
         
         submit_btn = st.form_submit_button("🚀 PHÂN TÍCH & SIÊU TỐI ƯU", use_container_width=True)
 
-# Khai báo Container rỗng để quản lý ẩn/hiện kết quả
 results_placeholder = st.empty()
 
-# Xử lý UX: Tự động "nhả chuột" (blur) khỏi input và Xóa kết quả cũ
 if submit_btn:
     js_hack = f"""<script>
     function forceBlur(){{
@@ -238,39 +236,59 @@ if submit_btn:
     peers = db_nganh[db_nganh['Sector'] == sector_name]['Ticker'].tolist()
     
     with st.spinner(f"🔍 Đang thu thập dữ liệu ngành '{sector_name}' ({len(peers)} mã)..."):
-        yf_tickers = [f"{t}.VN" for t in peers]
-        # Tải dư dả dữ liệu để hỗ trợ các khung thời gian dài
+        # Dò tìm thông minh: Cả đuôi .VN (HOSE) và .HN (HNX/UPCOM)
+        main_vn = f"{ticker_input}.VN"
+        main_hn = f"{ticker_input}.HN"
+        yf_tickers = list(set([f"{t}.VN" for t in peers] + [main_vn, main_hn]))
+        
         data = yf.download(yf_tickers, period="3y", interval="1d", progress=False)
         
-        if data.empty or 'Close' not in data:
+        if data.empty:
             st.error("❌ Mạng lỗi hoặc không tải được dữ liệu.")
             st.stop()
             
+        # Xử lý MultiIndex an toàn
         if isinstance(data.columns, pd.MultiIndex):
             close_data = data['Close']
         else:
-            close_data = data
+            if 'Close' in data.columns:
+                close_data = pd.DataFrame({yf_tickers[0]: data['Close']})
+            else:
+                close_data = pd.DataFrame()
             
-        if isinstance(close_data, pd.Series): 
-            close_data = close_data.to_frame(name=f"{ticker_input}.VN")
-            
-        main_ticker_yf = f"{ticker_input}.VN"
-        if main_ticker_yf not in close_data.columns:
-            st.error(f"❌ Mã {ticker_input} không có dữ liệu giao dịch gần đây.")
+        # Kiểm tra mã chính xác trên YF
+        main_ticker_yf = None
+        for candidate in [main_vn, main_hn]:
+            if candidate in close_data.columns and not close_data[candidate].dropna().empty:
+                main_ticker_yf = candidate
+                break
+                
+        if not main_ticker_yf:
+            st.error(f"❌ Mã {ticker_input} hiện không có dữ liệu trên Yahoo Finance (Thường gặp ở mã chưa niêm yết hoặc dữ liệu trống).")
             st.stop()
 
+        # Tính RSI Ngành (Bỏ qua các mã trống)
         rsi_df = pd.DataFrame(index=close_data.index)
         for t in close_data.columns:
-            rsi_df[t] = calculate_rsi(close_data[t])
+            # Lọc bỏ các cột NaN hoàn toàn
+            if not close_data[t].dropna().empty:
+                rsi_df[t] = calculate_rsi(close_data[t])
             
         sector_rsi_series = rsi_df.mean(axis=1).dropna()
-        current_sector_rsi = sector_rsi_series.iloc[-1]
+        current_sector_rsi = sector_rsi_series.iloc[-1] if not sector_rsi_series.empty else 50.0
         
         if current_sector_rsi < 35: sector_trend = "Downtrend"
         elif current_sector_rsi > 65: sector_trend = "Uptrend"
         else: sector_trend = "Bình thường"
             
+        # Trích xuất dữ liệu Cổ phiếu chính
         df_main = pd.DataFrame({'Close': close_data[main_ticker_yf].dropna()})
+        
+        # Bẫy lỗi nếu dữ liệu lịch sử quá ngắn
+        if len(df_main) < 30:
+            st.error(f"❌ Mã {ticker_input} có quá ít lịch sử giao dịch ({len(df_main)} ngày) để áp dụng siêu tối ưu. Vui lòng chọn mã khác.")
+            st.stop()
+            
         df_main['RSI'] = calculate_rsi(df_main['Close'])
         
         opt_ma, opt_sl, best_ret, user_ret, avg_hold_days, ma_series = optimize_ma_sl(df_main, sl_input)
@@ -320,7 +338,7 @@ if submit_btn:
             'avg_hold_days': avg_hold_days, 'current_price': current_price, 'current_rsi': current_rsi,
             'opt_ma': opt_ma, 'current_ma_val': current_ma_val, 'sector_name': sector_name,
             'sector_trend': sector_trend, 'current_sector_rsi': current_sector_rsi,
-            'df_main': df_main  # Lưu TOÀN BỘ dữ liệu để lọc thời gian
+            'df_main': df_main
         }
         st.session_state['analysis_done'] = True
 
@@ -329,7 +347,6 @@ if st.session_state.get('analysis_done', False):
     with results_placeholder.container():
         res = st.session_state['results']
         
-        # Lưới an toàn chống lỗi KeyError
         df_full = res.get('df_main', None)
         if df_full is None:
             st.info("🔄 Hệ thống vừa nâng cấp. Vui lòng ấn **🚀 PHÂN TÍCH & SIÊU TỐI ƯU** một lần nữa để làm mới dữ liệu!")
@@ -369,7 +386,7 @@ if st.session_state.get('analysis_done', False):
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # --- 7. BẢNG CHỈ SỐ KỸ THUẬT (BẰNG NHAU HOÀN HẢO) ---
+        # --- 7. BẢNG CHỈ SỐ KỸ THUẬT ---
         col_m1, col_m2 = st.columns(2, gap="large")
         
         with col_m1:
@@ -415,16 +432,14 @@ if st.session_state.get('analysis_done', False):
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # --- 8. BIỂU ĐỒ TRỰC QUAN (FULL WIDTH) ---
-        # Thêm Thanh Filter Chọn Thời Gian
+        # --- 8. BIỂU ĐỒ TRỰC QUAN ---
         time_range = st.radio(
             "⏳ Chọn khung thời gian hiển thị biểu đồ:",
             ["1 Tuần", "1 Tháng", "3 Tháng", "6 Tháng", "1 Năm", "3 Năm", "Toàn bộ"],
             horizontal=True,
-            index=3  # Mặc định chọn 6 Tháng cho cân đối
+            index=3
         )
         
-        # Xử lý UX Radio Button: Xóa focus khỏi ô Radio để phím mũi tên Lên/Xuống được dùng cuộn trang
         js_blur_radio = f"""
         <script>
             setTimeout(function() {{
@@ -438,7 +453,6 @@ if st.session_state.get('analysis_done', False):
         """
         components.html(js_blur_radio, height=0)
 
-        # Lọc dữ liệu dựa trên thời gian đã chọn
         if time_range == "1 Tuần": df_plot = df_full.iloc[-5:] 
         elif time_range == "1 Tháng": df_plot = df_full.iloc[-22:] 
         elif time_range == "3 Tháng": df_plot = df_full.iloc[-65:]
@@ -447,7 +461,6 @@ if st.session_state.get('analysis_done', False):
         elif time_range == "3 Năm": df_plot = df_full.iloc[-756:]
         else: df_plot = df_full
         
-        # Biểu đồ 1: Đường Giá và Đường MA (Hiển thị rộng toàn màn hình)
         st.markdown("<h4 style='color:#00E5FF; margin-top:10px; margin-bottom:10px;'>📈 DIỄN BIẾN GIÁ & HỖ TRỢ/KHÁNG CỰ ĐỘNG</h4>", unsafe_allow_html=True)
         fig1 = go.Figure()
         fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Close'], name='Đường Giá', line=dict(color='#FFFFFF', width=2.5)))
@@ -462,7 +475,6 @@ if st.session_state.get('analysis_done', False):
         
         st.markdown("<br><hr style='border-top: 1px dashed #444; margin: 10px 0;'><br>", unsafe_allow_html=True)
         
-        # Biểu đồ 2: RSI
         st.markdown("<h4 style='color:#00E676; margin-top:0px; margin-bottom:10px;'>⚡ CHỈ BÁO ĐỘNG LƯỢNG (RSI 14)</h4>", unsafe_allow_html=True)
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(x=df_plot.index, y=df_plot['RSI'], name='RSI', line=dict(color='#00E5FF', width=2)))
