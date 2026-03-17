@@ -73,10 +73,22 @@ st.markdown("""
 # --- 3. HÀM XỬ LÝ DỮ LIỆU & THUẬT TOÁN ---
 @st.cache_data
 def load_sector_database():
-    file_path = 'data/database_nganh.csv'
-    if not os.path.exists(file_path):
-        return None
-    return pd.read_csv(file_path)
+    # Lấy đường dẫn thư mục chứa file app.py hiện tại
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Kịch bản 1: File nằm trong thư mục con 'data' (chuẩn nhất)
+    path_1 = os.path.join(current_dir, 'data', 'database_nganh.csv')
+    
+    # Kịch bản 2: File bị up thẳng lên thư mục gốc (cùng chỗ với app.py)
+    path_2 = os.path.join(current_dir, 'database_nganh.csv')
+    
+    if os.path.exists(path_1):
+        return pd.read_csv(path_1)
+    elif os.path.exists(path_2):
+        return pd.read_csv(path_2)
+    
+    # Nếu vẫn không thấy, trả về None để báo lỗi
+    return None
 
 def calculate_rsi(prices, period=14):
     delta = prices.diff()
