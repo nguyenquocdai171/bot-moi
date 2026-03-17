@@ -8,7 +8,7 @@ import streamlit.components.v1 as components
 import random
 
 # --- 1. CẤU HÌNH TRANG (MỞ RỘNG TOÀN MÀN HÌNH) ---
-st.set_page_config(layout="wide", page_title="Stock Advisor", page_icon="🚀")
+st.set_page_config(layout="wide", page_title="Stock Advisor Super Pro", page_icon="🚀")
 
 st.markdown("""
 <style>
@@ -100,8 +100,8 @@ if 'results' not in st.session_state:
     st.session_state['results'] = {}
 
 # --- 2. GIAO DIỆN HEADER ---
-st.markdown("<div class='main-title'>STOCK ADVISOR</div>", unsafe_allow_html=True)
-st.markdown("<div class='sub-title'>Hệ thống Tối ưu hóa Kép (MA & Stoploss)</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>STOCK ADVISOR SUPER PRO</div>", unsafe_allow_html=True)
+st.markdown("<div class='sub-title'>Hệ thống Tối ưu hóa Kép</div>", unsafe_allow_html=True)
 
 st.markdown("""
 <div class='disclaimer-box'>
@@ -193,8 +193,7 @@ with col_main:
         
         submit_btn = st.form_submit_button("🚀 PHÂN TÍCH & SIÊU TỐI ƯU", use_container_width=True)
 
-# Khai báo một Container rỗng để chứa toàn bộ kết quả.
-# Nếu người dùng bấm Submit, container này sẽ bị xóa ngay lập tức để ẩn kết quả cũ!
+# Khai báo Container rỗng để quản lý ẩn/hiện kết quả
 results_placeholder = st.empty()
 
 # Xử lý UX: Tự động "nhả chuột" (blur) khỏi input và Xóa kết quả cũ
@@ -209,7 +208,7 @@ if submit_btn:
     </script><div style="display:none;">{random.random()}</div>"""
     components.html(js_hack, height=0)
     
-    # Ép buộc xóa sạch giao diện kết quả cũ khi đang chờ quay vòng vòng
+    # Ép buộc xóa sạch giao diện kết quả cũ khi đang chờ
     results_placeholder.empty()
 
 # --- 5. LỘ TRÌNH THỰC THI DỮ LIỆU ---
@@ -233,7 +232,8 @@ if submit_btn:
     
     with st.spinner(f"🔍 Đang thu thập dữ liệu ngành '{sector_name}' ({len(peers)} mã)..."):
         yf_tickers = [f"{t}.VN" for t in peers]
-        data = yf.download(yf_tickers, period="2y", interval="1d", progress=False)
+        # Tải dư dả dữ liệu để hỗ trợ các khung thời gian dài
+        data = yf.download(yf_tickers, period="3y", interval="1d", progress=False)
         
         if data.empty or 'Close' not in data:
             st.error("❌ Mạng lỗi hoặc không tải được dữ liệu.")
@@ -313,12 +313,11 @@ if submit_btn:
             'avg_hold_days': avg_hold_days, 'current_price': current_price, 'current_rsi': current_rsi,
             'opt_ma': opt_ma, 'current_ma_val': current_ma_val, 'sector_name': sector_name,
             'sector_trend': sector_trend, 'current_sector_rsi': current_sector_rsi,
-            'df_plot': df_main.iloc[-130:]
+            'df_main': df_main  # Lưu TOÀN BỘ dữ liệu để lọc thời gian
         }
         st.session_state['analysis_done'] = True
 
 # --- 6. HIỂN THỊ KẾT QUẢ KHI ĐÃ CÓ DỮ LIỆU ---
-# Bọc toàn bộ code hiển thị vào results_placeholder để nó được quản lý đóng/mở
 if st.session_state.get('analysis_done', False):
     with results_placeholder.container():
         res = st.session_state['results']
@@ -355,14 +354,33 @@ if st.session_state.get('analysis_done', False):
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
         
         # --- 7. BIỂU ĐỒ & BẢNG CHỈ SỐ TRỰC QUAN ---
+        st.markdown("### 📊 CHỈ SỐ KỸ THUẬT TỔNG QUAN")
+        
+        # Thêm Thanh Filter Chọn Thời Gian
+        time_range = st.radio(
+            "⏳ Chọn khung thời gian hiển thị biểu đồ:",
+            ["1 Tuần", "1 Tháng", "3 Tháng", "6 Tháng", "1 Năm", "3 Năm", "Toàn bộ"],
+            horizontal=True,
+            index=3  # Mặc định chọn 6 Tháng cho cân đối
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Lọc dữ liệu dựa trên thời gian đã chọn
+        df_full = res['df_main']
+        if time_range == "1 Tuần": df_plot = df_full.iloc[-5:] # Khoảng 5 phiên giao dịch
+        elif time_range == "1 Tháng": df_plot = df_full.iloc[-22:] # Khoảng 22 phiên
+        elif time_range == "3 Tháng": df_plot = df_full.iloc[-65:]
+        elif time_range == "6 Tháng": df_plot = df_full.iloc[-130:]
+        elif time_range == "1 Năm": df_plot = df_full.iloc[-252:]
+        elif time_range == "3 Năm": df_plot = df_full.iloc[-756:]
+        else: df_plot = df_full # Toàn bộ
+        
         col_chart, col_metric = st.columns([7, 3], gap="large")
         
         with col_chart:
-            df_plot = res['df_plot']
-            
             # Biểu đồ 1: Đường Giá và Đường MA
             st.markdown("<h4 style='color:#00E5FF; margin-top:0px; margin-bottom:10px;'>📈 DIỄN BIẾN GIÁ & ĐƯỜNG MA TỐI ƯU</h4>", unsafe_allow_html=True)
             fig1 = go.Figure()
@@ -376,7 +394,7 @@ if st.session_state.get('analysis_done', False):
             )
             st.plotly_chart(fig1, use_container_width=True, config={'displayModeBar': False})
             
-            # --- Tách biệt 2 Biểu đồ ---
+            # Tách biệt 2 Biểu đồ
             st.markdown("<br><hr style='border-top: 1px dashed #444; margin: 20px 0;'><br>", unsafe_allow_html=True)
             
             # Biểu đồ 2: RSI
@@ -386,9 +404,11 @@ if st.session_state.get('analysis_done', False):
             fig2.add_hline(y=70, line_dash='dash', line_color='#FF5252')
             fig2.add_hline(y=30, line_dash='dash', line_color='#00E676')
             
-            # Thêm text chú thích vùng RSI
-            fig2.add_annotation(x=df_plot.index[5], y=75, text="Quá Mua (70)", showarrow=False, font=dict(color="#FF5252"))
-            fig2.add_annotation(x=df_plot.index[5], y=25, text="Quá Bán (30)", showarrow=False, font=dict(color="#00E676"))
+            # Thêm text chú thích vùng RSI (lấy mốc thời gian an toàn để đặt text)
+            if len(df_plot) > 5:
+                anno_x = df_plot.index[int(len(df_plot)*0.05)]
+                fig2.add_annotation(x=anno_x, y=75, text="Quá Mua (70)", showarrow=False, font=dict(color="#FF5252"))
+                fig2.add_annotation(x=anno_x, y=25, text="Quá Bán (30)", showarrow=False, font=dict(color="#00E676"))
             
             fig2.update_layout(
                 template='plotly_dark', margin=dict(l=0, r=0, t=20, b=10), height=250,
@@ -398,12 +418,11 @@ if st.session_state.get('analysis_done', False):
             st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
 
         with col_metric:
-            # Chuẩn bị biến CSS an toàn trước khi nạp vào HTML
+            # Metric 1
             rsi_val = res['current_rsi']
             rsi_class = "m-sub-down" if rsi_val > 70 else ("m-sub-up" if rsi_val < 30 else "m-sub-neu")
             rsi_text = "🔥 Quá mua" if rsi_val > 70 else ("🧊 Quá bán" if rsi_val < 30 else "⚖️ Trung tính")
             
-            # Cấu trúc HTML viết liền mạch, loại bỏ các dòng trống (blank lines) để không dính lỗi Markdown Parse của Streamlit
             st.markdown(f"""
             <div class='metric-card'>
                 <div class='m-label'>🏷️ GIÁ HIỆN TẠI</div>
@@ -414,6 +433,7 @@ if st.session_state.get('analysis_done', False):
             </div>
             """, unsafe_allow_html=True)
             
+            # Metric 2
             trend_val = res['sector_trend']
             trend_class = "m-sub-down" if trend_val=="Downtrend" else ("m-sub-up" if trend_val=="Uptrend" else "m-sub-neu")
             trend_icon = "📉" if trend_val=="Downtrend" else ("📈" if trend_val=="Uptrend" else "➖")
