@@ -3,14 +3,17 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import os
+import plotly.graph_objects as go
+import streamlit.components.v1 as components
+import random
 
-# --- 1. CẤU HÌNH TRANG & CSS GIAO DIỆN ---
-st.set_page_config(layout="centered", page_title="Stock Advisor", page_icon="🚀")
+# --- 1. CẤU HÌNH TRANG (MỞ RỘNG TOÀN MÀN HÌNH) ---
+st.set_page_config(layout="wide", page_title="Stock Advisor", page_icon="🚀")
 
 st.markdown("""
 <style>
     /* Nền và font chữ tổng thể */
-    .stApp { background-color: #121418; color: #FFFFFF; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    .stApp { background-color: #0E1117; color: #FFFFFF; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     
     /* Header */
     .main-title {
@@ -33,7 +36,7 @@ st.markdown("""
 
     /* Inputs Override */
     div[data-baseweb="input"] { background-color: #262730; border-color: #41424C; border-radius: 6px; }
-    div[data-baseweb="input"] > input { color: white !important; font-weight: bold; }
+    div[data-baseweb="input"] > input { color: white !important; font-weight: bold; text-align: center;}
     label { color: #B0BEC5 !important; font-weight: bold !important; font-size: 0.95rem !important; }
 
     /* Nút Button (Nằm trong Form) */
@@ -44,17 +47,17 @@ st.markdown("""
     }
     div.stFormSubmitButton > button:hover { border-color: #00E676; color: #00E676; background-color: #121418; box-shadow: 0 0 10px rgba(0,230,118,0.2); }
 
-    /* Khối Kết Quả Tín Hiệu (Đã làm rực rỡ, giống ảnh 2) */
+    /* Khối Kết Quả Tín Hiệu */
     .result-box { padding: 30px 20px; border-radius: 12px; margin-top: 10px; text-align: center; box-shadow: 0 8px 20px rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1); }
-    .bg-buy { background: linear-gradient(135deg, #00C853, #1B5E20); } /* Xanh lá rực rỡ */
-    .bg-sell { background: linear-gradient(135deg, #D50000, #880E4F); } /* Đỏ rực rỡ */
-    .bg-warn { background: linear-gradient(135deg, #FF6D00, #E65100); } /* Cam rực rỡ */
-    .bg-neutral { background: linear-gradient(135deg, #0D47A1, #1565C0); } /* Xanh dương đậm y hệt ảnh */
+    .bg-buy { background: linear-gradient(135deg, #00C853, #1B5E20); }
+    .bg-sell { background: linear-gradient(135deg, #D50000, #880E4F); }
+    .bg-warn { background: linear-gradient(135deg, #FF6D00, #E65100); }
+    .bg-neutral { background: linear-gradient(135deg, #0D47A1, #1565C0); }
     
     .signal-text { font-size: 2.5rem; font-weight: 900; color: white; margin-bottom: 8px; text-shadow: 0 2px 5px rgba(0,0,0,0.5); text-transform: uppercase;}
     .reason-text { font-size: 1.1rem; color: #FAFAFA; font-style: italic; font-weight: 500;}
 
-    /* Khối Giao diện Backtest So Sánh (Chuẩn từ ảnh 2) */
+    /* Khối Giao diện Backtest So Sánh */
     .bt-container {
         display: flex; justify-content: space-around; align-items: center;
         background: linear-gradient(135deg, #263238 0%, #1E272C 100%);
@@ -69,7 +72,19 @@ st.markdown("""
     .bt-divider { width: 1px; background-color: #546E7A; height: 100px; margin: 0 20px; opacity: 0.5; }
     .opt-badge { background-color: #00E5FF; color: #000; padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 900; margin-left: 8px; vertical-align: middle; box-shadow: 0 0 10px rgba(0, 229, 255, 0.4); letter-spacing: 0.5px;}
 
-    /* Reponsive cho điện thoại */
+    /* Khối Thẻ Chỉ số Mới (Card) */
+    .metric-card {
+        background-color: #1E272C; border: 1px solid #37474F; border-radius: 10px;
+        padding: 20px 15px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        height: 100%; margin-bottom: 15px; transition: transform 0.2s;
+    }
+    .metric-card:hover { transform: translateY(-5px); border-color: #546E7A; }
+    .m-label { font-size: 0.9rem; color: #90A4AE; font-weight: bold; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px;}
+    .m-val { font-size: 2.2rem; font-weight: 900; color: white; margin-bottom: 10px;}
+    .m-sub-up { background-color: rgba(0,230,118,0.15); color: #00E676; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: bold;}
+    .m-sub-down { background-color: rgba(255,82,82,0.15); color: #FF5252; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: bold;}
+    .m-sub-neu { background-color: rgba(255,255,255,0.1); color: #FFF; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: bold;}
+
     @media (max-width: 600px) {
         .bt-container { flex-direction: column; padding: 20px; }
         .bt-divider { width: 100%; height: 1px; margin: 20px 0; }
@@ -116,7 +131,6 @@ def run_simulation(strategy_returns, sl_level):
     return np.prod(1 + adj_ret) - 1
 
 def optimize_ma_sl(df, user_sl):
-    """Tối ưu hóa MA, SL và Trả về cả Số ngày nắm giữ trung bình"""
     close_arr = df['Close'].values
     returns = np.diff(close_arr) / close_arr[:-1]
     returns = np.insert(returns, 0, 0)
@@ -146,17 +160,13 @@ def optimize_ma_sl(df, user_sl):
     user_sl_decimal = float(user_sl) / 100.0
     user_cum_return = run_simulation(strategy_returns[best_ma_idx], user_sl_decimal)
     
-    # Tính số ngày nắm giữ trung bình của chiến lược MA tốt nhất
     best_sig = signals[best_ma_idx]
     trades = np.sum(np.diff(np.insert(best_sig, 0, 0)) == 1)
     total_days_held = np.sum(best_sig)
     avg_hold_days = total_days_held / trades if trades > 0 else 0
     
-    # Quy đổi Lợi nhuận ra % theo Năm (%/năm)
-    try:
-        days_total = (df.index[-1] - df.index[0]).days
-    except:
-        days_total = len(df)
+    try: days_total = (df.index[-1] - df.index[0]).days
+    except: days_total = len(df)
         
     years = days_total / 365.25 if days_total > 0 else 1
     best_ann_ret = max_cum_return / years
@@ -164,17 +174,31 @@ def optimize_ma_sl(df, user_sl):
     
     return opt_ma_window, best_sl * 100, best_ann_ret * 100, user_ann_ret * 100, avg_hold_days, opt_ma_series
 
-# --- 4. FORM NHẬP LIỆU (HỖ TRỢ ENTER & NÚT FULL WIDTH) ---
-# Wrap toàn bộ bằng st.form để khi nhập xong bấm phím Enter sẽ tự chạy
-with st.form(key='search_form'):
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        ticker_input = st.text_input("Mã cổ phiếu:", placeholder="VD: HPG, VNM...").upper().strip()
-    with col2:
-        sl_input = st.number_input("SL mong muốn (%):", min_value=0.0, max_value=20.0, value=7.0, step=0.1, format="%.1f")
-    
-    # Nút bấm được set use_container_width=True để trải dài ra nhìn đẹp mắt
-    submit_btn = st.form_submit_button("🚀 PHÂN TÍCH & SIÊU TỐI ƯU", use_container_width=True)
+# --- 4. FORM NHẬP LIỆU (CĂN GIỮA ĐỂ KHÔNG BỊ QUÁ TO TRÊN MÀN RỘNG) ---
+# Tạo 3 cột để ép form vào giữa màn hình
+col_pad1, col_main, col_pad2 = st.columns([1, 2, 1])
+
+with col_main:
+    with st.form(key='search_form'):
+        f_col1, f_col2 = st.columns([2, 1])
+        with f_col1:
+            ticker_input = st.text_input("Mã cổ phiếu:", placeholder="VD: HPG, VNM...").upper().strip()
+        with f_col2:
+            sl_input = st.number_input("SL mong muốn (%):", min_value=0.0, max_value=20.0, value=7.0, step=0.1, format="%.1f")
+        
+        submit_btn = st.form_submit_button("🚀 PHÂN TÍCH & SIÊU TỐI ƯU", use_container_width=True)
+
+# Xử lý UX: Tự động "nhả chuột" (blur) khỏi input sau khi bấm Enter
+if submit_btn:
+    js_hack = f"""<script>
+    function forceBlur(){{
+        const activeElement=window.parent.document.activeElement;
+        if(activeElement){{activeElement.blur();}}
+        window.parent.document.body.focus();
+    }}
+    forceBlur(); setTimeout(forceBlur, 100); setTimeout(forceBlur, 500);
+    </script><div style="display:none;">{random.random()}</div>"""
+    components.html(js_hack, height=0)
 
 # --- 5. LỘ TRÌNH THỰC THI CHÍNH ---
 if submit_btn:
@@ -184,12 +208,12 @@ if submit_btn:
         
     db_nganh = load_sector_database()
     if db_nganh is None:
-        st.error("❌ Không tìm thấy file `database_nganh.csv`. Vui lòng chạy file `prepare_sectors.py` trước!")
+        st.error("❌ Không tìm thấy file `database_nganh.csv`.")
         st.stop()
         
     ticker_info = db_nganh[db_nganh['Ticker'] == ticker_input]
     if ticker_info.empty:
-        st.error(f"❌ Mã {ticker_input} không tồn tại trong Database Ngành. Vui lòng kiểm tra lại.")
+        st.error(f"❌ Mã {ticker_input} không tồn tại trong Database Ngành.")
         st.stop()
         
     sector_name = ticker_info.iloc[0]['Sector']
@@ -200,7 +224,7 @@ if submit_btn:
         data = yf.download(yf_tickers, period="2y", interval="1d", progress=False)
         
         if data.empty or 'Close' not in data:
-            st.error("❌ Mạng lỗi hoặc không tải được dữ liệu từ Yahoo Finance.")
+            st.error("❌ Mạng lỗi hoặc không tải được dữ liệu.")
             st.stop()
             
         if isinstance(data.columns, pd.MultiIndex):
@@ -231,6 +255,7 @@ if submit_btn:
         df_main['RSI'] = calculate_rsi(df_main['Close'])
         
         opt_ma, opt_sl, best_ret, user_ret, avg_hold_days, ma_series = optimize_ma_sl(df_main, sl_input)
+        df_main['MA_Opt'] = ma_series
         
         current_price = df_main['Close'].iloc[-1]
         current_rsi = df_main['RSI'].iloc[-1]
@@ -270,8 +295,6 @@ if submit_btn:
                 bg_class = "bg-sell"
 
         # --- 7. HIỂN THỊ KẾT QUẢ ---
-        
-        # 7.1 Box Tín Hiệu (Màu Sắc Rực Rỡ)
         st.markdown(f"""
         <div class='result-box {bg_class}'>
             <div class='signal-text'>{signal}</div>
@@ -279,13 +302,12 @@ if submit_btn:
         </div>
         """, unsafe_allow_html=True)
         
-        # 7.2 Box Backtest (Sao chép 100% tỷ lệ từ Ảnh 2)
         u_color = "#00E676" if user_ret > 0 else "#FF5252"
         o_color = "#00E5FF" 
         sl_text_user = f"{sl_input}%" if sl_input > 0 else "OFF"
         sl_text_opt = f"{opt_sl:.1f}%" if opt_sl > 0 else "OFF"
         
-        html_box = f"""
+        st.markdown(f"""
         <div class='bt-container'>
             <div class='bt-col'>
                 <div class='bt-label'>CỦA BẠN (SL {sl_text_user})</div>
@@ -301,19 +323,71 @@ if submit_btn:
                 <div class='bt-hold'>⏳ Nắm giữ TB: {avg_hold_days:.0f} ngày</div>
             </div>
         </div>
-        """
-        st.markdown(html_box, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # 7.3 Bảng Thông Số Kỹ Thuật Dưới Cùng
-        st.markdown("### 📊 CHỈ SỐ KỸ THUẬT HIỆN TẠI")
-        col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric("Giá Hiện Tại", f"{current_price:,.0f}")
-        col_m1.metric("RSI Cổ phiếu (14)", f"{current_rsi:.1f}")
+        # --- 8. PHẦN MỚI: BIỂU ĐỒ & BẢNG CHỈ SỐ TRỰC QUAN ---
+        st.markdown("### 📊 CHỈ SỐ KỸ THUẬT TỔNG QUAN")
         
-        col_m2.metric(f"Đường MA Tối Ưu", f"MA {opt_ma}", delta=f"{current_ma_val:,.0f} (Giá MA)", delta_color="off")
-        col_m2.metric("Stoploss Tối Ưu", f"{opt_sl:.1f}%")
+        # Chia bố cục: Cột trái vẽ Biểu đồ (rộng), Cột phải hiển thị Bảng Chỉ Số (hẹp)
+        col_chart, col_metric = st.columns([7, 3])
         
-        col_m3.metric(f"Ngành: {sector_name}", f"RSI: {current_sector_rsi:.1f}")
-        col_m3.metric("Xu hướng Ngành", sector_trend, delta="↓" if sector_trend=="Downtrend" else ("↑" if sector_trend=="Uptrend" else "-"), delta_color="inverse" if sector_trend=="Downtrend" else "normal")
+        with col_chart:
+            # Lấy data 6 tháng gần nhất để vẽ cho đẹp, tránh nhìn nhằng nhịt
+            df_plot = df_main.iloc[-130:] 
+            
+            # Biểu đồ 1: Đường Giá và Đường MA
+            fig1 = go.Figure()
+            fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Close'], name='Đường Giá', line=dict(color='#FFFFFF', width=2.5)))
+            fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['MA_Opt'], name=f'MA {opt_ma}', line=dict(color='#FF9800', width=2, dash='solid')))
+            fig1.update_layout(
+                title="Diễn biến Giá & Đường Trung bình Tối ưu",
+                template='plotly_dark', margin=dict(l=0, r=0, t=40, b=0), height=300,
+                legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5),
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0.1)',
+                xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333')
+            )
+            st.plotly_chart(fig1, use_container_width=True, config={'displayModeBar': False})
+            
+            # Biểu đồ 2: RSI
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(x=df_plot.index, y=df_plot['RSI'], name='RSI', line=dict(color='#00E5FF', width=2)))
+            fig2.add_hline(y=70, line_dash='dash', line_color='#FF5252', annotation_text="Quá Mua (70)", annotation_position="top left")
+            fig2.add_hline(y=30, line_dash='dash', line_color='#00E676', annotation_text="Quá Bán (30)", annotation_position="bottom left")
+            fig2.update_layout(
+                template='plotly_dark', margin=dict(l=0, r=0, t=10, b=10), height=180,
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0.1)',
+                xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333', range=[10, 90])
+            )
+            st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
+
+        with col_metric:
+            # Tạo các thẻ Metric Card bằng HTML/CSS tự thiết kế
+            # Thẻ 1: Giá & RSI
+            st.markdown(f"""
+            <div class='metric-card'>
+                <div class='m-label'>🏷️ Giá Hiện Tại</div>
+                <div class='m-val'>{current_price:,.0f}</div>
+                <div class='m-label' style='margin-top:15px;'>⚡ RSI Cổ Phiếu</div>
+                <div class='m-val'>{current_rsi:.1f}</div>
+                <div class='{"m-sub-down" if current_rsi > 70 else ("m-sub-up" if current_rsi < 30 else "m-sub-neu")}'>
+                    {"🔥 Quá mua" if current_rsi > 70 else ("🧊 Quá bán" if current_rsi < 30 else "⚖️ Trung tính")}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Thẻ 2: MA & Xu hướng Ngành
+            st.markdown(f"""
+            <div class='metric-card'>
+                <div class='m-label'>🎯 Đường MA Tối Ưu</div>
+                <div class='m-val' style='color:#FF9800;'>MA {opt_ma}</div>
+                <div class='m-sub-neu'>Mốc hỗ trợ/kháng cự: {current_ma_val:,.0f}</div>
+                
+                <div class='m-label' style='margin-top:15px;'>🏢 Cấp độ Ngành</div>
+                <div class='m-val' style='font-size:1.5rem;'>{sector_name}</div>
+                <div class='{"m-sub-down" if sector_trend=="Downtrend" else ("m-sub-up" if sector_trend=="Uptrend" else "m-sub-neu")}'>
+                    {"📉 " if sector_trend=="Downtrend" else ("📈 " if sector_trend=="Uptrend" else "➖ ")}{sector_trend} (RSI: {current_sector_rsi:.1f})
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
