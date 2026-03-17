@@ -75,14 +75,14 @@ st.markdown("""
     /* Khối Thẻ Chỉ số Mới Cân Bằng (Fixed Height & Flexbox) */
     .metric-card {
         background-color: #1E272C; border: 1px solid #37474F; border-radius: 12px;
-        padding: 25px 15px; text-align: center; box-shadow: 0 6px 12px rgba(0,0,0,0.3);
-        height: 310px; /* ÉP CHIỀU CAO CỐ ĐỊNH CHO 2 Ô BẰNG NHAU */
-        display: flex; flex-direction: column; justify-content: space-between;
+        padding: 15px 15px; text-align: center; box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+        height: 320px; /* ÉP CHIỀU CAO CỐ ĐỊNH CHO 2 Ô BẰNG NHAU */
+        display: flex; flex-direction: column;
         margin-bottom: 15px; transition: transform 0.2s;
     }
     .metric-card:hover { transform: translateY(-3px); border-color: #546E7A; }
     
-    .m-section { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .m-section { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
     .m-label { font-size: 0.85rem; color: #90A4AE; font-weight: bold; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px;}
     .m-val { font-size: 2.4rem; font-weight: 900; color: white; margin-bottom: 6px; line-height: 1.1;}
     .m-val-text { font-size: 1.6rem; font-weight: 900; color: #00E5FF; margin-bottom: 6px; line-height: 1.1;}
@@ -90,7 +90,7 @@ st.markdown("""
     .m-sub-up { background-color: rgba(0,230,118,0.15); color: #00E676; padding: 5px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: bold; display: inline-block;}
     .m-sub-down { background-color: rgba(255,82,82,0.15); color: #FF5252; padding: 5px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: bold; display: inline-block;}
     .m-sub-neu { background-color: rgba(255,255,255,0.1); color: #FFF; padding: 5px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: bold; display: inline-block;}
-    .m-divider { width: 60%; height: 1px; background-color: #37474F; margin: 15px auto; }
+    .m-divider { width: 70%; height: 1px; background-color: #37474F; margin: 0 auto; flex-shrink: 0; }
 
     @media (max-width: 600px) {
         .bt-container { flex-direction: column; padding: 20px; }
@@ -352,7 +352,7 @@ if st.session_state.get('analysis_done', False):
         st.markdown(f"""
         <div class='bt-container'>
             <div class='bt-col'>
-                <div class='bt-label'>CỦA BẠN (SL {sl_text_user})</div>
+                <div class='bt-label'>CHIẾN LƯỢC CỦA BẠN (SL {sl_text_user})</div>
                 <div class='bt-val' style='color:{u_color}'>{res['user_ret']:+.1f}%<span style='font-size:1.4rem'>/năm</span></div>
                 <div class='bt-note'>Hiệu quả lợi nhuận trung bình</div>
                 <div class='bt-hold'>⏳ Nắm giữ TB: {res['avg_hold_days']:.0f} ngày</div>
