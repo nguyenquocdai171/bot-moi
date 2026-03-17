@@ -322,6 +322,12 @@ if st.session_state.get('analysis_done', False):
     with results_placeholder.container():
         res = st.session_state['results']
         
+        # Lưới an toàn chống lỗi KeyError
+        df_full = res.get('df_main', res.get('df_plot'))
+        if df_full is None:
+            st.info("🔄 Hệ thống vừa nâng cấp. Vui lòng ấn **🚀 PHÂN TÍCH & SIÊU TỐI ƯU** một lần nữa để làm mới dữ liệu!")
+            st.stop()
+            
         # 6.1 Box Tín Hiệu
         st.markdown(f"""
         <div class='result-box {res['bg_class']}'>
@@ -356,69 +362,12 @@ if st.session_state.get('analysis_done', False):
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # --- 7. BIỂU ĐỒ & BẢNG CHỈ SỐ TRỰC QUAN ---
+        # --- 7. BẢNG CHỈ SỐ KỸ THUẬT (ĐƯA LÊN TRÊN BIỂU ĐỒ) ---
         st.markdown("### 📊 CHỈ SỐ KỸ THUẬT TỔNG QUAN")
         
-        # Thêm Thanh Filter Chọn Thời Gian
-        time_range = st.radio(
-            "⏳ Chọn khung thời gian hiển thị biểu đồ:",
-            ["1 Tuần", "1 Tháng", "3 Tháng", "6 Tháng", "1 Năm", "3 Năm", "Toàn bộ"],
-            horizontal=True,
-            index=3  # Mặc định chọn 6 Tháng cho cân đối
-        )
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        # Lọc dữ liệu dựa trên thời gian đã chọn
-        df_full = res['df_main']
-        if time_range == "1 Tuần": df_plot = df_full.iloc[-5:] # Khoảng 5 phiên giao dịch
-        elif time_range == "1 Tháng": df_plot = df_full.iloc[-22:] # Khoảng 22 phiên
-        elif time_range == "3 Tháng": df_plot = df_full.iloc[-65:]
-        elif time_range == "6 Tháng": df_plot = df_full.iloc[-130:]
-        elif time_range == "1 Năm": df_plot = df_full.iloc[-252:]
-        elif time_range == "3 Năm": df_plot = df_full.iloc[-756:]
-        else: df_plot = df_full # Toàn bộ
+        col_m1, col_m2 = st.columns(2, gap="large")
         
-        col_chart, col_metric = st.columns([7, 3], gap="large")
-        
-        with col_chart:
-            # Biểu đồ 1: Đường Giá và Đường MA
-            st.markdown("<h4 style='color:#00E5FF; margin-top:0px; margin-bottom:10px;'>📈 DIỄN BIẾN GIÁ & ĐƯỜNG MA TỐI ƯU</h4>", unsafe_allow_html=True)
-            fig1 = go.Figure()
-            fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Close'], name='Đường Giá', line=dict(color='#FFFFFF', width=2.5)))
-            fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['MA_Opt'], name=f"MA {res['opt_ma']}", line=dict(color='#FF9800', width=2, dash='solid')))
-            fig1.update_layout(
-                template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), height=350,
-                legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5),
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0.2)',
-                xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333')
-            )
-            st.plotly_chart(fig1, use_container_width=True, config={'displayModeBar': False})
-            
-            # Tách biệt 2 Biểu đồ
-            st.markdown("<br><hr style='border-top: 1px dashed #444; margin: 20px 0;'><br>", unsafe_allow_html=True)
-            
-            # Biểu đồ 2: RSI
-            st.markdown("<h4 style='color:#00E676; margin-top:0px; margin-bottom:10px;'>⚡ CHỈ BÁO ĐỘNG LƯỢNG (RSI 14)</h4>", unsafe_allow_html=True)
-            fig2 = go.Figure()
-            fig2.add_trace(go.Scatter(x=df_plot.index, y=df_plot['RSI'], name='RSI', line=dict(color='#00E5FF', width=2)))
-            fig2.add_hline(y=70, line_dash='dash', line_color='#FF5252')
-            fig2.add_hline(y=30, line_dash='dash', line_color='#00E676')
-            
-            # Thêm text chú thích vùng RSI (lấy mốc thời gian an toàn để đặt text)
-            if len(df_plot) > 5:
-                anno_x = df_plot.index[int(len(df_plot)*0.05)]
-                fig2.add_annotation(x=anno_x, y=75, text="Quá Mua (70)", showarrow=False, font=dict(color="#FF5252"))
-                fig2.add_annotation(x=anno_x, y=25, text="Quá Bán (30)", showarrow=False, font=dict(color="#00E676"))
-            
-            fig2.update_layout(
-                template='plotly_dark', margin=dict(l=0, r=0, t=20, b=10), height=250,
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0.2)',
-                xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333', range=[10, 90])
-            )
-            st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
-
-        with col_metric:
-            # Metric 1
+        with col_m1:
             rsi_val = res['current_rsi']
             rsi_class = "m-sub-down" if rsi_val > 70 else ("m-sub-up" if rsi_val < 30 else "m-sub-neu")
             rsi_text = "🔥 Quá mua" if rsi_val > 70 else ("🧊 Quá bán" if rsi_val < 30 else "⚖️ Trung tính")
@@ -427,13 +376,13 @@ if st.session_state.get('analysis_done', False):
             <div class='metric-card'>
                 <div class='m-label'>🏷️ GIÁ HIỆN TẠI</div>
                 <div class='m-val'>{res['current_price']:,.0f}</div>
-                <div class='m-label' style='margin-top:20px;'>⚡ RSI CỔ PHIẾU</div>
+                <div class='m-label' style='margin-top:15px;'>⚡ RSI CỔ PHIẾU</div>
                 <div class='m-val'>{rsi_val:.1f}</div>
                 <div class='{rsi_class}'>{rsi_text}</div>
             </div>
             """, unsafe_allow_html=True)
             
-            # Metric 2
+        with col_m2:
             trend_val = res['sector_trend']
             trend_class = "m-sub-down" if trend_val=="Downtrend" else ("m-sub-up" if trend_val=="Uptrend" else "m-sub-neu")
             trend_icon = "📉" if trend_val=="Downtrend" else ("📈" if trend_val=="Uptrend" else "➖")
@@ -443,10 +392,78 @@ if st.session_state.get('analysis_done', False):
                 <div class='m-label'>🎯 ĐƯỜNG MA TỐI ƯU</div>
                 <div class='m-val' style='color:#FF9800;'>MA {res['opt_ma']}</div>
                 <div class='m-sub-neu'>Hỗ trợ/kháng cự: {res['current_ma_val']:,.0f}</div>
-                <div class='m-label' style='margin-top:20px;'>🏢 CẤP ĐỘ NGÀNH</div>
+                <div class='m-label' style='margin-top:15px;'>🏢 CẤP ĐỘ NGÀNH</div>
                 <div class='m-val' style='font-size:1.4rem; color:#00E5FF;'>{res['sector_name']}</div>
                 <div class='{trend_class}'>
                     {trend_icon} {trend_val} &nbsp;|&nbsp; RSI Ngành: {res['current_sector_rsi']:.1f}
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # --- 8. BIỂU ĐỒ TRỰC QUAN (FULL WIDTH) ---
+        # Thêm Thanh Filter Chọn Thời Gian
+        time_range = st.radio(
+            "⏳ Chọn khung thời gian hiển thị biểu đồ:",
+            ["1 Tuần", "1 Tháng", "3 Tháng", "6 Tháng", "1 Năm", "3 Năm", "Toàn bộ"],
+            horizontal=True,
+            index=3  # Mặc định chọn 6 Tháng cho cân đối
+        )
+        
+        # Xử lý UX Radio Button: Xóa focus khỏi ô Radio để phím mũi tên Lên/Xuống được dùng cuộn trang
+        js_blur_radio = f"""
+        <script>
+            setTimeout(function() {{
+                const active = window.parent.document.activeElement;
+                if(active && active.tagName === 'INPUT') {{
+                    active.blur();
+                }}
+            }}, 50);
+        </script>
+        <div style="display:none;">{random.random()}</div>
+        """
+        components.html(js_blur_radio, height=0)
+
+        # Lọc dữ liệu dựa trên thời gian đã chọn
+        if time_range == "1 Tuần": df_plot = df_full.iloc[-5:] 
+        elif time_range == "1 Tháng": df_plot = df_full.iloc[-22:] 
+        elif time_range == "3 Tháng": df_plot = df_full.iloc[-65:]
+        elif time_range == "6 Tháng": df_plot = df_full.iloc[-130:]
+        elif time_range == "1 Năm": df_plot = df_full.iloc[-252:]
+        elif time_range == "3 Năm": df_plot = df_full.iloc[-756:]
+        else: df_plot = df_full
+        
+        # Biểu đồ 1: Đường Giá và Đường MA (Hiển thị rộng toàn màn hình)
+        st.markdown("<h4 style='color:#00E5FF; margin-top:10px; margin-bottom:10px;'>📈 DIỄN BIẾN GIÁ & ĐƯỜNG MA TỐI ƯU</h4>", unsafe_allow_html=True)
+        fig1 = go.Figure()
+        fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Close'], name='Đường Giá', line=dict(color='#FFFFFF', width=2.5)))
+        fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['MA_Opt'], name=f"MA {res['opt_ma']}", line=dict(color='#FF9800', width=2, dash='solid')))
+        fig1.update_layout(
+            template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), height=400,
+            legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5),
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0.2)',
+            xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333')
+        )
+        st.plotly_chart(fig1, use_container_width=True, config={'displayModeBar': False})
+        
+        st.markdown("<br><hr style='border-top: 1px dashed #444; margin: 10px 0;'><br>", unsafe_allow_html=True)
+        
+        # Biểu đồ 2: RSI
+        st.markdown("<h4 style='color:#00E676; margin-top:0px; margin-bottom:10px;'>⚡ CHỈ BÁO ĐỘNG LƯỢNG (RSI 14)</h4>", unsafe_allow_html=True)
+        fig2 = go.Figure()
+        fig2.add_trace(go.Scatter(x=df_plot.index, y=df_plot['RSI'], name='RSI', line=dict(color='#00E5FF', width=2)))
+        fig2.add_hline(y=70, line_dash='dash', line_color='#FF5252')
+        fig2.add_hline(y=30, line_dash='dash', line_color='#00E676')
+        
+        if len(df_plot) > 5:
+            anno_x = df_plot.index[int(len(df_plot)*0.05)]
+            fig2.add_annotation(x=anno_x, y=75, text="Quá Mua (70)", showarrow=False, font=dict(color="#FF5252"))
+            fig2.add_annotation(x=anno_x, y=25, text="Quá Bán (30)", showarrow=False, font=dict(color="#00E676"))
+        
+        fig2.update_layout(
+            template='plotly_dark', margin=dict(l=0, r=0, t=20, b=10), height=300,
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0.2)',
+            xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333', range=[10, 90])
+        )
+        st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
