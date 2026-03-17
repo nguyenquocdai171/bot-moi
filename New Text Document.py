@@ -72,23 +72,31 @@ st.markdown("""
     .bt-divider { width: 1px; background-color: #546E7A; height: 100px; margin: 0 20px; opacity: 0.5; }
     .opt-badge { background-color: #00E5FF; color: #000; padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 900; margin-left: 8px; vertical-align: middle; box-shadow: 0 0 10px rgba(0, 229, 255, 0.4); letter-spacing: 0.5px;}
 
-    /* Khối Thẻ Chỉ số Mới (Card) */
+    /* Khối Thẻ Chỉ số Mới Cân Bằng (Fixed Height & Flexbox) */
     .metric-card {
-        background-color: #1E272C; border: 1px solid #37474F; border-radius: 10px;
-        padding: 20px 15px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        background-color: #1E272C; border: 1px solid #37474F; border-radius: 12px;
+        padding: 25px 15px; text-align: center; box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+        height: 310px; /* ÉP CHIỀU CAO CỐ ĐỊNH CHO 2 Ô BẰNG NHAU */
+        display: flex; flex-direction: column; justify-content: space-between;
         margin-bottom: 15px; transition: transform 0.2s;
     }
     .metric-card:hover { transform: translateY(-3px); border-color: #546E7A; }
-    .m-label { font-size: 0.85rem; color: #90A4AE; font-weight: bold; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px;}
-    .m-val { font-size: 2.2rem; font-weight: 900; color: white; margin-bottom: 10px;}
+    
+    .m-section { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .m-label { font-size: 0.85rem; color: #90A4AE; font-weight: bold; text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px;}
+    .m-val { font-size: 2.4rem; font-weight: 900; color: white; margin-bottom: 6px; line-height: 1.1;}
+    .m-val-text { font-size: 1.6rem; font-weight: 900; color: #00E5FF; margin-bottom: 6px; line-height: 1.1;}
+    
     .m-sub-up { background-color: rgba(0,230,118,0.15); color: #00E676; padding: 5px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: bold; display: inline-block;}
     .m-sub-down { background-color: rgba(255,82,82,0.15); color: #FF5252; padding: 5px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: bold; display: inline-block;}
     .m-sub-neu { background-color: rgba(255,255,255,0.1); color: #FFF; padding: 5px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: bold; display: inline-block;}
+    .m-divider { width: 60%; height: 1px; background-color: #37474F; margin: 15px auto; }
 
     @media (max-width: 600px) {
         .bt-container { flex-direction: column; padding: 20px; }
         .bt-divider { width: 100%; height: 1px; margin: 20px 0; }
         .bt-val { font-size: 2.2rem; }
+        .metric-card { height: auto; }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -208,7 +216,6 @@ if submit_btn:
     </script><div style="display:none;">{random.random()}</div>"""
     components.html(js_hack, height=0)
     
-    # Ép buộc xóa sạch giao diện kết quả cũ khi đang chờ
     results_placeholder.empty()
 
 # --- 5. LỘ TRÌNH THỰC THI DỮ LIỆU ---
@@ -323,7 +330,7 @@ if st.session_state.get('analysis_done', False):
         res = st.session_state['results']
         
         # Lưới an toàn chống lỗi KeyError
-        df_full = res.get('df_main', res.get('df_plot'))
+        df_full = res.get('df_main', None)
         if df_full is None:
             st.info("🔄 Hệ thống vừa nâng cấp. Vui lòng ấn **🚀 PHÂN TÍCH & SIÊU TỐI ƯU** một lần nữa để làm mới dữ liệu!")
             st.stop()
@@ -362,9 +369,7 @@ if st.session_state.get('analysis_done', False):
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # --- 7. BẢNG CHỈ SỐ KỸ THUẬT (ĐƯA LÊN TRÊN BIỂU ĐỒ) ---
-        st.markdown("### 📊 CHỈ SỐ KỸ THUẬT TỔNG QUAN")
-        
+        # --- 7. BẢNG CHỈ SỐ KỸ THUẬT (BẰNG NHAU HOÀN HẢO) ---
         col_m1, col_m2 = st.columns(2, gap="large")
         
         with col_m1:
@@ -374,11 +379,16 @@ if st.session_state.get('analysis_done', False):
             
             st.markdown(f"""
             <div class='metric-card'>
-                <div class='m-label'>🏷️ GIÁ HIỆN TẠI</div>
-                <div class='m-val'>{res['current_price']:,.0f}</div>
-                <div class='m-label' style='margin-top:15px;'>⚡ RSI CỔ PHIẾU</div>
-                <div class='m-val'>{rsi_val:.1f}</div>
-                <div class='{rsi_class}'>{rsi_text}</div>
+                <div class='m-section'>
+                    <div class='m-label'>🏷️ GIÁ HIỆN TẠI</div>
+                    <div class='m-val'>{res['current_price']:,.0f}</div>
+                </div>
+                <div class='m-divider'></div>
+                <div class='m-section'>
+                    <div class='m-label'>⚡ RSI CỔ PHIẾU</div>
+                    <div class='m-val'>{rsi_val:.1f}</div>
+                    <div class='{rsi_class}'>{rsi_text}</div>
+                </div>
             </div>
             """, unsafe_allow_html=True)
             
@@ -389,13 +399,16 @@ if st.session_state.get('analysis_done', False):
             
             st.markdown(f"""
             <div class='metric-card'>
-                <div class='m-label'>🎯 ĐƯỜNG MA TỐI ƯU</div>
-                <div class='m-val' style='color:#FF9800;'>MA {res['opt_ma']}</div>
-                <div class='m-sub-neu'>Hỗ trợ/kháng cự: {res['current_ma_val']:,.0f}</div>
-                <div class='m-label' style='margin-top:15px;'>🏢 CẤP ĐỘ NGÀNH</div>
-                <div class='m-val' style='font-size:1.4rem; color:#00E5FF;'>{res['sector_name']}</div>
-                <div class='{trend_class}'>
-                    {trend_icon} {trend_val} &nbsp;|&nbsp; RSI Ngành: {res['current_sector_rsi']:.1f}
+                <div class='m-section'>
+                    <div class='m-label'>🎯 HỖ TRỢ/KHÁNG CỰ ĐỘNG</div>
+                    <div class='m-val' style='color:#FF9800;'>MA {res['opt_ma']}</div>
+                    <div class='m-sub-neu'>Mốc giá: {res['current_ma_val']:,.0f}</div>
+                </div>
+                <div class='m-divider'></div>
+                <div class='m-section'>
+                    <div class='m-label'>🏢 XU HƯỚNG NGÀNH ({res['sector_name']})</div>
+                    <div class='m-val-text'>{trend_val}</div>
+                    <div class='{trend_class}'>RSI Ngành: {res['current_sector_rsi']:.1f}</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -435,7 +448,7 @@ if st.session_state.get('analysis_done', False):
         else: df_plot = df_full
         
         # Biểu đồ 1: Đường Giá và Đường MA (Hiển thị rộng toàn màn hình)
-        st.markdown("<h4 style='color:#00E5FF; margin-top:10px; margin-bottom:10px;'>📈 DIỄN BIẾN GIÁ & ĐƯỜNG MA TỐI ƯU</h4>", unsafe_allow_html=True)
+        st.markdown("<h4 style='color:#00E5FF; margin-top:10px; margin-bottom:10px;'>📈 DIỄN BIẾN GIÁ & HỖ TRỢ/KHÁNG CỰ ĐỘNG</h4>", unsafe_allow_html=True)
         fig1 = go.Figure()
         fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Close'], name='Đường Giá', line=dict(color='#FFFFFF', width=2.5)))
         fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['MA_Opt'], name=f"MA {res['opt_ma']}", line=dict(color='#FF9800', width=2, dash='solid')))
