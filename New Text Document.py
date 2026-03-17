@@ -72,7 +72,7 @@ st.markdown("""
     .bt-divider { width: 1px; background-color: #546E7A; height: 100px; margin: 0 20px; opacity: 0.5; }
     .opt-badge { background-color: #00E5FF; color: #000; padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 900; margin-left: 8px; vertical-align: middle; box-shadow: 0 0 10px rgba(0, 229, 255, 0.4); letter-spacing: 0.5px;}
 
-    /* Khối Thẻ Chỉ số Mới (Card) - Đã sửa lỗi HTML */
+    /* Khối Thẻ Chỉ số Mới (Card) */
     .metric-card {
         background-color: #1E272C; border: 1px solid #37474F; border-radius: 10px;
         padding: 20px 15px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
@@ -93,7 +93,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Khởi tạo Session State để lưu kết quả phân tích (Giúp ẩn kết quả cũ khi đang tải)
+# Khởi tạo Session State để lưu kết quả phân tích
 if 'analysis_done' not in st.session_state:
     st.session_state['analysis_done'] = False
 if 'results' not in st.session_state:
@@ -193,7 +193,11 @@ with col_main:
         
         submit_btn = st.form_submit_button("🚀 PHÂN TÍCH & SIÊU TỐI ƯU", use_container_width=True)
 
-# Xử lý UX: Tự động "nhả chuột" (blur) khỏi input
+# Khai báo một Container rỗng để chứa toàn bộ kết quả.
+# Nếu người dùng bấm Submit, container này sẽ bị xóa ngay lập tức để ẩn kết quả cũ!
+results_placeholder = st.empty()
+
+# Xử lý UX: Tự động "nhả chuột" (blur) khỏi input và Xóa kết quả cũ
 if submit_btn:
     js_hack = f"""<script>
     function forceBlur(){{
@@ -205,8 +209,8 @@ if submit_btn:
     </script><div style="display:none;">{random.random()}</div>"""
     components.html(js_hack, height=0)
     
-    # Ẩn kết quả cũ đi để hiển thị tiến trình loading
-    st.session_state['analysis_done'] = False
+    # Ép buộc xóa sạch giao diện kết quả cũ khi đang chờ quay vòng vòng
+    results_placeholder.empty()
 
 # --- 5. LỘ TRÌNH THỰC THI DỮ LIỆU ---
 if submit_btn:
@@ -314,114 +318,115 @@ if submit_btn:
         st.session_state['analysis_done'] = True
 
 # --- 6. HIỂN THỊ KẾT QUẢ KHI ĐÃ CÓ DỮ LIỆU ---
+# Bọc toàn bộ code hiển thị vào results_placeholder để nó được quản lý đóng/mở
 if st.session_state.get('analysis_done', False):
-    res = st.session_state['results']
-    
-    # 6.1 Box Tín Hiệu
-    st.markdown(f"""
-    <div class='result-box {res['bg_class']}'>
-        <div class='signal-text'>{res['signal']}</div>
-        <div class='reason-text'>💡 {res['output_msg']}</div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # 6.2 Box Backtest
-    u_color = "#00E676" if res['user_ret'] > 0 else "#FF5252"
-    o_color = "#00E5FF" 
-    sl_text_user = f"{res['sl_input']}%" if res['sl_input'] > 0 else "OFF"
-    sl_text_opt = f"{res['opt_sl']:.1f}%" if res['opt_sl'] > 0 else "OFF"
-    
-    st.markdown(f"""
-    <div class='bt-container'>
-        <div class='bt-col'>
-            <div class='bt-label'>CỦA BẠN (SL {sl_text_user})</div>
-            <div class='bt-val' style='color:{u_color}'>{res['user_ret']:+.1f}%<span style='font-size:1.4rem'>/năm</span></div>
-            <div class='bt-note'>Hiệu quả lợi nhuận trung bình</div>
-            <div class='bt-hold'>⏳ Nắm giữ TB: {res['avg_hold_days']:.0f} ngày</div>
-        </div>
-        <div class='bt-divider'></div>
-        <div class='bt-col'>
-            <div class='bt-label'>TỐI ƯU NHẤT <span class='opt-badge'>RECOMMENDED</span></div>
-            <div class='bt-val' style='color:{o_color}'>{res['best_ret']:+.1f}%<span style='font-size:1.4rem'>/năm</span></div>
-            <div class='bt-note'>Với mức Stoploss <b>{sl_text_opt}</b></div>
-            <div class='bt-hold'>⏳ Nắm giữ TB: {res['avg_hold_days']:.0f} ngày</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # --- 7. BIỂU ĐỒ & BẢNG CHỈ SỐ TRỰC QUAN ---
-    st.markdown("### 📊 CHỈ SỐ KỸ THUẬT TỔNG QUAN")
-    
-    col_chart, col_metric = st.columns([7, 3], gap="large")
-    
-    with col_chart:
-        df_plot = res['df_plot']
+    with results_placeholder.container():
+        res = st.session_state['results']
         
-        # Biểu đồ 1: Đường Giá và Đường MA
-        st.markdown("<h5 style='color:#00E5FF; margin-bottom:-10px;'>📈 Diễn biến Giá & Đường MA Tối ưu</h5>", unsafe_allow_html=True)
-        fig1 = go.Figure()
-        fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Close'], name='Đường Giá', line=dict(color='#FFFFFF', width=2.5)))
-        fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['MA_Opt'], name=f"MA {res['opt_ma']}", line=dict(color='#FF9800', width=2, dash='solid')))
-        fig1.update_layout(
-            template='plotly_dark', margin=dict(l=0, r=0, t=30, b=0), height=250,
-            legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5),
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0.2)',
-            xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333')
-        )
-        st.plotly_chart(fig1, use_container_width=True, config={'displayModeBar': False})
-        
-        st.markdown("<hr style='border-top: 1px dashed #444; margin: 10px 0;'>", unsafe_allow_html=True)
-        
-        # Biểu đồ 2: RSI
-        st.markdown("<h5 style='color:#00E676; margin-bottom:-10px;'>⚡ Chỉ báo Động lượng (RSI 14)</h5>", unsafe_allow_html=True)
-        fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(x=df_plot.index, y=df_plot['RSI'], name='RSI', line=dict(color='#00E5FF', width=2)))
-        fig2.add_hline(y=70, line_dash='dash', line_color='#FF5252')
-        fig2.add_hline(y=30, line_dash='dash', line_color='#00E676')
-        
-        # Thêm text chú thích vùng RSI
-        fig2.add_annotation(x=df_plot.index[5], y=75, text="Quá Mua (70)", showarrow=False, font=dict(color="#FF5252"))
-        fig2.add_annotation(x=df_plot.index[5], y=25, text="Quá Bán (30)", showarrow=False, font=dict(color="#00E676"))
-        
-        fig2.update_layout(
-            template='plotly_dark', margin=dict(l=0, r=0, t=30, b=10), height=180,
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0.2)',
-            xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333', range=[10, 90])
-        )
-        st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
-
-    with col_metric:
-        # Chuẩn bị biến CSS an toàn trước khi nạp vào HTML
-        rsi_val = res['current_rsi']
-        rsi_class = "m-sub-down" if rsi_val > 70 else ("m-sub-up" if rsi_val < 30 else "m-sub-neu")
-        rsi_text = "🔥 Quá mua" if rsi_val > 70 else ("🧊 Quá bán" if rsi_val < 30 else "⚖️ Trung tính")
-        
+        # 6.1 Box Tín Hiệu
         st.markdown(f"""
-        <div class='metric-card'>
-            <div class='m-label'>🏷️ GIÁ HIỆN TẠI</div>
-            <div class='m-val'>{res['current_price']:,.0f}</div>
-            <div class='m-label' style='margin-top:20px;'>⚡ RSI CỔ PHIẾU</div>
-            <div class='m-val'>{rsi_val:.1f}</div>
-            <div class='{rsi_class}'>{rsi_text}</div>
+        <div class='result-box {res['bg_class']}'>
+            <div class='signal-text'>{res['signal']}</div>
+            <div class='reason-text'>💡 {res['output_msg']}</div>
         </div>
         """, unsafe_allow_html=True)
         
-        trend_val = res['sector_trend']
-        trend_class = "m-sub-down" if trend_val=="Downtrend" else ("m-sub-up" if trend_val=="Uptrend" else "m-sub-neu")
-        trend_icon = "📉" if trend_val=="Downtrend" else ("📈" if trend_val=="Uptrend" else "➖")
+        # 6.2 Box Backtest
+        u_color = "#00E676" if res['user_ret'] > 0 else "#FF5252"
+        o_color = "#00E5FF" 
+        sl_text_user = f"{res['sl_input']}%" if res['sl_input'] > 0 else "OFF"
+        sl_text_opt = f"{res['opt_sl']:.1f}%" if res['opt_sl'] > 0 else "OFF"
         
         st.markdown(f"""
-        <div class='metric-card'>
-            <div class='m-label'>🎯 ĐƯỜNG MA TỐI ƯU</div>
-            <div class='m-val' style='color:#FF9800;'>MA {res['opt_ma']}</div>
-            <div class='m-sub-neu'>Hỗ trợ/kháng cự: {res['current_ma_val']:,.0f}</div>
-            
-            <div class='m-label' style='margin-top:20px;'>🏢 CẤP ĐỘ NGÀNH</div>
-            <div class='m-val' style='font-size:1.5rem; color:#00E5FF;'>{res['sector_name']}</div>
-            <div class='{trend_class}'>
-                {trend_icon} {trend_val} (RSI Ngành: {res['current_sector_rsi']:.1f})
+        <div class='bt-container'>
+            <div class='bt-col'>
+                <div class='bt-label'>CỦA BẠN (SL {sl_text_user})</div>
+                <div class='bt-val' style='color:{u_color}'>{res['user_ret']:+.1f}%<span style='font-size:1.4rem'>/năm</span></div>
+                <div class='bt-note'>Hiệu quả lợi nhuận trung bình</div>
+                <div class='bt-hold'>⏳ Nắm giữ TB: {res['avg_hold_days']:.0f} ngày</div>
+            </div>
+            <div class='bt-divider'></div>
+            <div class='bt-col'>
+                <div class='bt-label'>TỐI ƯU NHẤT <span class='opt-badge'>RECOMMENDED</span></div>
+                <div class='bt-val' style='color:{o_color}'>{res['best_ret']:+.1f}%<span style='font-size:1.4rem'>/năm</span></div>
+                <div class='bt-note'>Với mức Stoploss <b>{sl_text_opt}</b></div>
+                <div class='bt-hold'>⏳ Nắm giữ TB: {res['avg_hold_days']:.0f} ngày</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
+        
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        
+        # --- 7. BIỂU ĐỒ & BẢNG CHỈ SỐ TRỰC QUAN ---
+        col_chart, col_metric = st.columns([7, 3], gap="large")
+        
+        with col_chart:
+            df_plot = res['df_plot']
+            
+            # Biểu đồ 1: Đường Giá và Đường MA
+            st.markdown("<h4 style='color:#00E5FF; margin-top:0px; margin-bottom:10px;'>📈 DIỄN BIẾN GIÁ & ĐƯỜNG MA TỐI ƯU</h4>", unsafe_allow_html=True)
+            fig1 = go.Figure()
+            fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Close'], name='Đường Giá', line=dict(color='#FFFFFF', width=2.5)))
+            fig1.add_trace(go.Scatter(x=df_plot.index, y=df_plot['MA_Opt'], name=f"MA {res['opt_ma']}", line=dict(color='#FF9800', width=2, dash='solid')))
+            fig1.update_layout(
+                template='plotly_dark', margin=dict(l=0, r=0, t=20, b=0), height=350,
+                legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5),
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0.2)',
+                xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333')
+            )
+            st.plotly_chart(fig1, use_container_width=True, config={'displayModeBar': False})
+            
+            # --- Tách biệt 2 Biểu đồ ---
+            st.markdown("<br><hr style='border-top: 1px dashed #444; margin: 20px 0;'><br>", unsafe_allow_html=True)
+            
+            # Biểu đồ 2: RSI
+            st.markdown("<h4 style='color:#00E676; margin-top:0px; margin-bottom:10px;'>⚡ CHỈ BÁO ĐỘNG LƯỢNG (RSI 14)</h4>", unsafe_allow_html=True)
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(x=df_plot.index, y=df_plot['RSI'], name='RSI', line=dict(color='#00E5FF', width=2)))
+            fig2.add_hline(y=70, line_dash='dash', line_color='#FF5252')
+            fig2.add_hline(y=30, line_dash='dash', line_color='#00E676')
+            
+            # Thêm text chú thích vùng RSI
+            fig2.add_annotation(x=df_plot.index[5], y=75, text="Quá Mua (70)", showarrow=False, font=dict(color="#FF5252"))
+            fig2.add_annotation(x=df_plot.index[5], y=25, text="Quá Bán (30)", showarrow=False, font=dict(color="#00E676"))
+            
+            fig2.update_layout(
+                template='plotly_dark', margin=dict(l=0, r=0, t=20, b=10), height=250,
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0.2)',
+                xaxis=dict(showgrid=True, gridcolor='#333'), yaxis=dict(showgrid=True, gridcolor='#333', range=[10, 90])
+            )
+            st.plotly_chart(fig2, use_container_width=True, config={'displayModeBar': False})
+
+        with col_metric:
+            # Chuẩn bị biến CSS an toàn trước khi nạp vào HTML
+            rsi_val = res['current_rsi']
+            rsi_class = "m-sub-down" if rsi_val > 70 else ("m-sub-up" if rsi_val < 30 else "m-sub-neu")
+            rsi_text = "🔥 Quá mua" if rsi_val > 70 else ("🧊 Quá bán" if rsi_val < 30 else "⚖️ Trung tính")
+            
+            # Cấu trúc HTML viết liền mạch, loại bỏ các dòng trống (blank lines) để không dính lỗi Markdown Parse của Streamlit
+            st.markdown(f"""
+            <div class='metric-card'>
+                <div class='m-label'>🏷️ GIÁ HIỆN TẠI</div>
+                <div class='m-val'>{res['current_price']:,.0f}</div>
+                <div class='m-label' style='margin-top:20px;'>⚡ RSI CỔ PHIẾU</div>
+                <div class='m-val'>{rsi_val:.1f}</div>
+                <div class='{rsi_class}'>{rsi_text}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            trend_val = res['sector_trend']
+            trend_class = "m-sub-down" if trend_val=="Downtrend" else ("m-sub-up" if trend_val=="Uptrend" else "m-sub-neu")
+            trend_icon = "📉" if trend_val=="Downtrend" else ("📈" if trend_val=="Uptrend" else "➖")
+            
+            st.markdown(f"""
+            <div class='metric-card'>
+                <div class='m-label'>🎯 ĐƯỜNG MA TỐI ƯU</div>
+                <div class='m-val' style='color:#FF9800;'>MA {res['opt_ma']}</div>
+                <div class='m-sub-neu'>Hỗ trợ/kháng cự: {res['current_ma_val']:,.0f}</div>
+                <div class='m-label' style='margin-top:20px;'>🏢 CẤP ĐỘ NGÀNH</div>
+                <div class='m-val' style='font-size:1.4rem; color:#00E5FF;'>{res['sector_name']}</div>
+                <div class='{trend_class}'>
+                    {trend_icon} {trend_val} &nbsp;|&nbsp; RSI Ngành: {res['current_sector_rsi']:.1f}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
