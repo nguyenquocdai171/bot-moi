@@ -5,20 +5,15 @@ import os
 import yfinance as yf
 from datetime import datetime, timedelta
 
-# --- MAP NGÀNH CỐ ĐỊNH ---
-# Khai báo sẵn ngành giúp loại bỏ hoàn toàn việc gọi API lấy thông tin công ty
-# Tránh 100% rủi ro bị ban IP / Rate limit từ các nguồn cấp dữ liệu
-SECTOR_MAP = {
-    'SSI': 'Chứng khoán', 'VND': 'Chứng khoán', 'HCM': 'Chứng khoán', 'VCI': 'Chứng khoán', 'FTS': 'Chứng khoán',
-    'VCB': 'Ngân hàng', 'TCB': 'Ngân hàng', 'MBB': 'Ngân hàng', 'VPB': 'Ngân hàng', 'STB': 'Ngân hàng', 'CTG': 'Ngân hàng', 'BID': 'Ngân hàng',
-    'HPG': 'Thép', 'HSG': 'Thép', 'NKG': 'Thép',
-    'FPT': 'Công nghệ', 'MWG': 'Bán lẻ', 'PNJ': 'Bán lẻ', 'MSN': 'Tiêu dùng', 'VNM': 'Tiêu dùng',
-    'VHM': 'Bất động sản', 'VIC': 'Bất động sản', 'VRE': 'Bất động sản', 'NVL': 'Bất động sản', 'DIG': 'Bất động sản', 'DXG': 'Bất động sản'
-}
-
-def get_target_tickers():
-    """Lấy danh sách mã chứng khoán từ Map có sẵn"""
-    return list(SECTOR_MAP.keys())
+def load_sector_database():
+    """Đọc danh sách mã và ngành trực tiếp từ file CSV (Không dùng danh sách cứng nữa)"""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    path_1 = os.path.join(current_dir, 'data', 'database_nganh.csv')
+    path_2 = os.path.join(current_dir, 'database_nganh.csv')
+    
+    if os.path.exists(path_1): return pd.read_csv(path_1)
+    elif os.path.exists(path_2): return pd.read_csv(path_2)
+    else: raise FileNotFoundError("Không tìm thấy file database_nganh.csv! Hãy chạy prepare_sectors.py trước.")
 
 def calculate_rsi(prices, period=14):
     """Tính RSI sử dụng Vectorization của Pandas."""
@@ -48,10 +43,11 @@ def optimize_ma_sl_vectorized(df):
     signals[:, 0] = 0
     
     strategy_returns = signals * returns
-    sl_levels = np.arange(0.0, 0.101, 0.001)
+    # Chỉnh lại biên độ Stoploss từ 3.0% đến 10.0%, bước nhảy 0.5% theo đúng UI
+    sl_levels = np.arange(0.03, 0.105, 0.005)
     
     best_ma_idx = 0
-    best_sl = 0.0
+    best_sl = 0.03
     max_cum_return = -np.inf
 
     for i, ma_ret in enumerate(strategy_returns):
@@ -69,61 +65,75 @@ def optimize_ma_sl_vectorized(df):
     return opt_ma_window, best_sl, opt_ma_series
 
 def fetch_and_process_market_data():
-    """Hàm main: Dùng yfinance cào data chậm rãi, chống Ban IP"""
-    tickers = get_target_tickers()
+    """Hàm main: Dùng yfinance tải dữ liệu HÀNG LOẠT (Bulk) cực nhanh để tránh treo máy"""
+    db_nganh = load_sector_database()
+    tickers = db_nganh['Ticker'].tolist()
+    
+    print(f"🚀 Bắt đầu crawl dữ liệu {len(tickers)} mã từ file database...")
+    
+    # Tạo danh sách gom cả đuôi .VN và .HN để quét 1 lần duy nhất (Bulk Download)
+    yf_tickers = [f"{t}.VN" for t in tickers] + [f"{t}.HN" for t in tickers]
+    
+    print("⏳ Đang tải dữ liệu Hàng loạt từ Yahoo Finance (Sẽ mất khoảng 1-2 phút)...")
+    # Tải Bulk Download (Nhanh gấp hàng trăm lần so với tải từng mã và dùng time.sleep)
+    data = yf.download(yf_tickers, period="2y", interval="1d", progress=True)
+    
+    if data.empty or 'Close' not in data:
+        raise ValueError("❌ Không thể tải dữ liệu từ Yahoo Finance.")
+        
+    if isinstance(data.columns, pd.MultiIndex):
+        close_data = data['Close']
+    else:
+        close_data = pd.DataFrame({yf_tickers[0]: data['Close']})
+        
     all_data = []
+    print(f"✅ Tải xong! Đang tính toán ma trận siêu tốc cho từng mã...")
     
-    print(f"🚀 Bắt đầu crawl dữ liệu {len(tickers)} mã bằng YFINANCE (Chống Ban IP)...")
-    
-    for ticker in tickers:
-        symbol = f"{ticker}.VN" # Thêm đuôi .VN cho chứng khoán VN trên yfinance
-        try:
-            # Lấy data lịch sử 2 năm
-            df = yf.download(symbol, period="2y", interval="1d", progress=False)
+    for index, row in db_nganh.iterrows():
+        ticker = row['Ticker']
+        sector = row['Sector']
+        
+        main_vn = f"{ticker}.VN"
+        main_hn = f"{ticker}.HN"
+        
+        # Dò tìm Ticker hợp lệ có dữ liệu
+        valid_sym = None
+        if main_vn in close_data.columns and not close_data[main_vn].dropna().empty:
+            valid_sym = main_vn
+        elif main_hn in close_data.columns and not close_data[main_hn].dropna().empty:
+            valid_sym = main_hn
             
-            if df is None or df.empty:
-                print(f"⚠️ Bỏ qua {ticker}: Không tìm thấy dữ liệu trên yfinance")
-                continue
-            
-            # Xử lý MultiIndex columns nếu dùng yfinance bản mới
-            if isinstance(df.columns, pd.MultiIndex): 
-                df.columns = df.columns.get_level_values(0)
-            
-            # Reset index để biến 'Date' thành 1 cột
-            df = df.reset_index()
-            df.rename(columns={'Date': 'Date', 'Close': 'Close', 'Volume': 'Volume'}, inplace=True, errors='ignore')
-            
-            # Chuẩn hóa múi giờ để dễ lưu file CSV
-            df['Date'] = pd.to_datetime(df['Date']).dt.tz_localize(None)
-            df.sort_values('Date', inplace=True)
-            
-            # Gán ngành tĩnh (Cực kỳ an toàn, không cần gọi API)
-            sector = SECTOR_MAP.get(ticker, 'Unknown')
-            df['Sector'] = sector
-            df['Ticker'] = ticker
-            
-            # Các tính toán cốt lõi
-            df['RSI'] = calculate_rsi(df['Close'], 14)
-            opt_ma, opt_sl, ma_series = optimize_ma_sl_vectorized(df)
-            df['Opt_MA_Period'] = opt_ma
-            df['Opt_SL'] = opt_sl
-            df['Opt_MA_Value'] = ma_series
-            
-            all_data.append(df)
-            
-            # Sleep 1.5 giây cho chắc cú, yfinance cho phép lấy nhanh hơn nhưng chậm cho bền
-            time.sleep(1.5) 
-            print(f"✅ Đã xử lý: {ticker} | Ngành: {sector} | Opt MA: {opt_ma} | Opt SL: {opt_sl:.1%}")
-            
-        except Exception as e:
-            print(f"❌ Lỗi tại mã {ticker}: {e}")
-            time.sleep(3) # Nghỉ lâu hơn nếu bị lỗi
+        if not valid_sym:
             continue
+            
+        # Rút trích dữ liệu của 1 mã
+        df_ticker = pd.DataFrame({'Close': close_data[valid_sym].dropna()})
+        
+        # Cổ phiếu quá mới không đủ để tính toán
+        if len(df_ticker) < 30:
+            continue
+            
+        df_ticker['Ticker'] = ticker
+        df_ticker['Sector'] = sector
+        
+        # Tính toán chỉ số & Siêu tối ưu
+        df_ticker['RSI'] = calculate_rsi(df_ticker['Close'], 14)
+        opt_ma, opt_sl, ma_series = optimize_ma_sl_vectorized(df_ticker)
+        df_ticker['Opt_MA_Period'] = opt_ma
+        df_ticker['Opt_SL'] = opt_sl
+        df_ticker['Opt_MA_Value'] = ma_series
+        
+        # Định dạng lại cột Date
+        df_ticker = df_ticker.reset_index()
+        df_ticker.rename(columns={'index': 'Date', 'Date': 'Date'}, inplace=True)
+        df_ticker['Date'] = pd.to_datetime(df_ticker['Date']).dt.tz_localize(None)
+        
+        all_data.append(df_ticker)
 
     if not all_data:
         raise ValueError("Không có dữ liệu nào được thu thập!")
 
-    print("\n⏳ Đang phân tích Ma trận tín hiệu & Cấp độ ngành...")
+    print("\n⏳ Đang phân tích Ma trận tín hiệu & Cấp độ ngành theo Luật chuẩn...")
     market_df = pd.concat(all_data, ignore_index=True)
     
     # --- TÍNH TOÁN CẤP ĐỘ NGÀNH (SECTOR TREND) BẰNG VECTORIZATION ---
@@ -136,7 +146,7 @@ def fetch_and_process_market_data():
         default='Bình thường'
     )
     
-    # --- MA TRẬN TÍN HIỆU & CẢNH BÁO LÕI (LOGIC MỚI CHUẨN) ---
+    # --- MA TRẬN TÍN HIỆU & CẢNH BÁO LÕI (LOGIC MỚI CHUẨN ĐỒNG BỘ VỚI UI) ---
     cond_buy_base = (market_df['Close'] < market_df['Opt_MA_Value']) & (market_df['RSI'] < 30)
     cond_sell_base = (market_df['Close'] > market_df['Opt_MA_Value']) & (market_df['RSI'] > 70)
     
