@@ -286,7 +286,8 @@ if submit_btn:
         # Gom mã cần tải: Mã người dùng nhập (cả VN và HN) + Các mã HOSE cùng ngành
         yf_tickers = list(set([f"{t}.VN" for t in peers_hose] + [main_vn, main_hn]))
         
-        data = yf.download(yf_tickers, period="3y", interval="1d", progress=False)
+        # Tải toàn bộ dữ liệu từ trước đến nay (period="max")
+        data = yf.download(yf_tickers, period="max", interval="1d", progress=False)
         
         if data.empty:
             st.error("❌ Mạng lỗi hoặc không tải được dữ liệu.")
