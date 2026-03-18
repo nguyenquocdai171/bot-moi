@@ -442,18 +442,18 @@ if st.session_state.get('analysis_done', False):
                 <div class='bt-label'>CHIẾN LƯỢC CỦA BẠN (SL {sl_text_user})</div>
                 <div class='bt-val' style='color:{u_color}'>{res['user_ret']:+.1f}%<span style='font-size:1.4rem'>/năm</span></div>
                 <div class='bt-note'>Hiệu quả lợi nhuận trung bình</div>
-                <div class='bt-hold'>✅ Lời: {res['user_avg_tp_hold']:.0f} ngày</div>
-                <div class='bt-hold-sl'>❌ Lỗ: {res['user_avg_sl_hold']:.0f} ngày</div>
-                <div class='bt-note' style='margin-top:8px;'>Tỷ lệ chạm Cắt lỗ: <b>{res['user_sl_rate']:.1f}%</b></div>
+                <div class='bt-hold'>✅ Gồng lời trung bình: {res['user_avg_tp_hold']:.0f} ngày</div>
+                <div class='bt-hold-sl'>❌ Phải cắt lỗ trung bình sau: {res['user_avg_sl_hold']:.0f} ngày</div>
+                <div class='bt-note' style='margin-top:8px;'>Tỷ lệ số lệnh phải cắt lỗ: <b>{res['user_sl_rate']:.1f}%</b></div>
             </div>
             <div class='bt-divider'></div>
             <div class='bt-col'>
                 <div class='bt-label'>TỐI ƯU NHẤT <span class='opt-badge'>RECOMMENDED</span></div>
                 <div class='bt-val' style='color:{o_color}'>{res['best_ret']:+.1f}%<span style='font-size:1.4rem'>/năm</span></div>
                 <div class='bt-note'>Với mức Stoploss <b>{sl_text_opt}</b></div>
-                <div class='bt-hold'>✅ Lời: {res['best_avg_tp_hold']:.0f} ngày</div>
-                <div class='bt-hold-sl'>❌ Lỗ: {res['best_avg_sl_hold']:.0f} ngày</div>
-                <div class='bt-note' style='margin-top:8px;'>Tỷ lệ chạm Cắt lỗ: <b>{res['best_sl_rate']:.1f}%</b></div>
+                <div class='bt-hold'>✅ Gồng lời trung bình: {res['best_avg_tp_hold']:.0f} ngày</div>
+                <div class='bt-hold-sl'>❌ Phải cắt lỗ trung bình sau: {res['best_avg_sl_hold']:.0f} ngày</div>
+                <div class='bt-note' style='margin-top:8px;'>Tỷ lệ số lệnh phải cắt lỗ: <b>{res['best_sl_rate']:.1f}%</b></div>
             </div>
         </div>
         """, unsafe_allow_html=True)
