@@ -139,53 +139,46 @@ def calculate_rsi(prices, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-# Hàm Backtest chạy đúng 100% logic MUA/BÁN kết hợp RSI và RSI Ngành
 def run_state_machine_simulation(close_arr, buy_triggers, sell_triggers, sl_val):
     in_trade = False
     entry_price = 0.0
     cum_ret = 1.0
     
-    # Biến theo dõi mới
-    tp_hold_days_list = [] # Số ngày gồng cho lệnh chốt LỜI
-    sl_hold_days_list = [] # Số ngày gồng cho lệnh cắt LỖ
-    total_trades = 0       # Tổng số lệnh đã đặt
-    sl_trades = 0          # Số lệnh dính Stoploss
+    tp_hold_days_list = [] 
+    sl_hold_days_list = [] 
+    total_trades = 0       
+    sl_trades = 0          
     current_hold = 0
 
     for i in range(1, len(close_arr)):
         if not in_trade:
-            # Tín hiệu mua từ phiên hôm qua -> Khớp lệnh phiên nay
             if buy_triggers[i-1]:
                 in_trade = True
                 entry_price = close_arr[i]
                 current_hold = 1
         else:
             current_hold += 1
-            # 1. Ưu tiên Stoploss: Giá giảm qua mốc SL
             if sl_val > 0 and (close_arr[i] - entry_price) / entry_price <= -sl_val:
                 cum_ret *= (1 - sl_val)
                 in_trade = False
-                sl_hold_days_list.append(current_hold) # Lưu vào danh sách cắt lỗ
+                sl_hold_days_list.append(current_hold)
                 total_trades += 1
                 sl_trades += 1
                 current_hold = 0
-            # 2. Kiểm tra điều kiện Chốt lời
             elif sell_triggers[i-1]:
                 trade_ret = (close_arr[i] - entry_price) / entry_price
                 cum_ret *= (1 + trade_ret)
-                tp_hold_days_list.append(current_hold) # Lưu vào danh sách chốt lời
+                tp_hold_days_list.append(current_hold)
                 total_trades += 1
                 in_trade = False
                 current_hold = 0
 
-    # Tất toán lệnh nếu ngày cuối cùng vẫn đang cầm cổ phiếu
     if in_trade:
         trade_ret = (close_arr[-1] - entry_price) / entry_price
         cum_ret *= (1 + trade_ret)
 
     total_return = cum_ret - 1
     
-    # Tính toán các chỉ số trung bình
     avg_tp_hold = np.mean(tp_hold_days_list) if len(tp_hold_days_list) > 0 else 0
     avg_sl_hold = np.mean(sl_hold_days_list) if len(sl_hold_days_list) > 0 else 0
     sl_rate = (sl_trades / total_trades * 100) if total_trades > 0 else 0.0
@@ -195,7 +188,6 @@ def run_state_machine_simulation(close_arr, buy_triggers, sell_triggers, sl_val)
 def optimize_ma_sl_advanced(df, user_sl, sector_rsi_series):
     close_arr = df['Close'].values
     rsi_arr = df['RSI'].values
-    # Đồng bộ dữ liệu RSI Ngành
     sec_rsi_arr = sector_rsi_series.reindex(df.index).ffill().values
     
     ma_windows = np.arange(5, 210, 5)
@@ -209,14 +201,19 @@ def optimize_ma_sl_advanced(df, user_sl, sector_rsi_series):
     best_avg_sl_hold = 0
     best_sl_rate = 0.0
     
-    # Quét tất cả các MA
     for w in ma_windows:
         ma_line = df['Close'].rolling(w).mean().values
         
-        # MUA BÌNH THƯỜNG: Giá < MA & RSI Mã < 30 & (40 < RSI Ngành <= 60)
-        buy_triggers = (close_arr < ma_line) & (rsi_arr < 30) & (sec_rsi_arr > 40) & (sec_rsi_arr <= 60)
-        # BÁN BÌNH THƯỜNG / BÁN NGAY LẬP TỨC: Giá > MA & RSI Mã > 70 & RSI Ngành <= 60
-        sell_triggers = (close_arr > ma_line) & (rsi_arr > 70) & (sec_rsi_arr <= 60)
+        # ĐIỀU KIỆN MUA MỚI: Giá < MA & RSI Mã < 30 & Ngành từ 35 đến 65
+        buy_triggers = (close_arr < ma_line) & (rsi_arr < 30) & (sec_rsi_arr >= 35) & (sec_rsi_arr <= 65)
+        
+        # ĐIỀU KIỆN BÁN MỚI:
+        # 1. Bán bình thường: Giá > MA & RSI Mã > 70 & Ngành từ 35 đến 65
+        # 2. Chốt lời sớm: Giá > MA & RSI Mã >= 65 & Ngành < 35 (Ngành downtrend)
+        sell_triggers = (close_arr > ma_line) & (
+            ((rsi_arr > 70) & (sec_rsi_arr >= 35) & (sec_rsi_arr <= 65)) |
+            ((rsi_arr >= 65) & (sec_rsi_arr < 35))
+        )
         
         for sl in sl_levels:
             ret, tp_hold, sl_hold, sl_rate = run_state_machine_simulation(close_arr, buy_triggers, sell_triggers, sl)
@@ -231,8 +228,11 @@ def optimize_ma_sl_advanced(df, user_sl, sector_rsi_series):
     # Tính cho User
     opt_ma_series = df['Close'].rolling(best_ma_idx).mean()
     ma_line_best = opt_ma_series.values
-    buy_triggers_best = (close_arr < ma_line_best) & (rsi_arr < 30) & (sec_rsi_arr > 40) & (sec_rsi_arr <= 60)
-    sell_triggers_best = (close_arr > ma_line_best) & (rsi_arr > 70) & (sec_rsi_arr <= 60)
+    buy_triggers_best = (close_arr < ma_line_best) & (rsi_arr < 30) & (sec_rsi_arr >= 35) & (sec_rsi_arr <= 65)
+    sell_triggers_best = (close_arr > ma_line_best) & (
+        ((rsi_arr > 70) & (sec_rsi_arr >= 35) & (sec_rsi_arr <= 65)) |
+        ((rsi_arr >= 65) & (sec_rsi_arr < 35))
+    )
     
     user_sl_decimal = float(user_sl) / 100.0
     user_ret, user_avg_tp_hold, user_avg_sl_hold, user_sl_rate = run_state_machine_simulation(close_arr, buy_triggers_best, sell_triggers_best, user_sl_decimal)
@@ -296,17 +296,14 @@ if submit_btn:
     if 'Exchange' in db_nganh.columns:
         peers_hose = db_nganh[(db_nganh['Sector'] == sector_name) & (db_nganh['Exchange'] == 'HOSE')]['Ticker'].tolist()
     else:
-        # Fallback nếu file thiếu cột Exchange
         peers_hose = db_nganh[db_nganh['Sector'] == sector_name]['Ticker'].tolist()
     
     with st.spinner(f"🔍 Đang phân tích mã {ticker_input} và {len(peers_hose)} mã HOSE cùng ngành '{sector_name}'..."):
         main_vn = f"{ticker_input}.VN"
         main_hn = f"{ticker_input}.HN"
         
-        # Gom mã cần tải: Mã người dùng nhập (cả VN và HN) + Các mã HOSE cùng ngành
         yf_tickers = list(set([f"{t}.VN" for t in peers_hose] + [main_vn, main_hn]))
         
-        # Tải toàn bộ dữ liệu từ trước đến nay (period="max")
         data = yf.download(yf_tickers, period="max", interval="1d", progress=False)
         
         if data.empty:
@@ -321,7 +318,6 @@ if submit_btn:
             else:
                 close_data = pd.DataFrame()
             
-        # Tìm mã hợp lệ trên Yahoo Finance
         main_ticker_yf = None
         for candidate in [main_vn, main_hn]:
             if candidate in close_data.columns and not close_data[candidate].dropna().empty:
@@ -332,13 +328,11 @@ if submit_btn:
             st.error(f"❌ Mã {ticker_input} hiện không có dữ liệu trên Yahoo Finance.")
             st.stop()
 
-        # Tính RSI cho tất cả các cột
         rsi_df = pd.DataFrame(index=close_data.index)
         for t in close_data.columns:
             if not close_data[t].dropna().empty:
                 rsi_df[t] = calculate_rsi(close_data[t])
             
-        # TÍNH TRUNG BÌNH RSI NGÀNH TỪ CÁC MÃ HOSE
         hose_peer_cols = [f"{t}.VN" for t in peers_hose]
         valid_hose_cols = [c for c in hose_peer_cols if c in rsi_df.columns]
         
@@ -349,7 +343,6 @@ if submit_btn:
             
         current_sector_rsi = sector_rsi_series.iloc[-1] if not sector_rsi_series.empty else 50.0
         
-        # Trích xuất dữ liệu Cổ phiếu chính
         df_main = pd.DataFrame({'Close': close_data[main_ticker_yf].dropna()})
         
         if len(df_main) < 30:
@@ -365,39 +358,39 @@ if submit_btn:
         current_rsi = df_main['RSI'].iloc[-1]
         current_ma_val = ma_series.iloc[-1]
         
-        # --- MA TRẬN TÍN HIỆU LÕI ---
+        # --- MA TRẬN TÍN HIỆU LÕI MỚI CHUẨN XÁC ---
         signal = "QUAN SÁT (WAIT)"
         output_msg = f"Giá và RSI chưa đạt điều kiện lý tưởng. Tiếp tục theo dõi."
         bg_class = "bg-neutral"
         
         # KIỂM TRA MUA BẮT ĐÁY
         if current_price < current_ma_val and current_rsi < 30:
-            if current_sector_rsi <= 40:
+            if current_sector_rsi < 35:
                 signal = "KHOAN MUA"
-                output_msg = "Mã rớt về vùng quá bán, nhưng Ngành đang Downtrend -> Chờ ngành ổn định."
+                output_msg = "Mã rớt về vùng quá bán, nhưng Ngành đang Downtrend (RSI < 35) -> KHOAN MUA."
                 bg_class = "bg-warn"
-            elif 40 < current_sector_rsi <= 60:
+            elif 35 <= current_sector_rsi <= 65:
                 signal = "MUA BÌNH THƯỜNG"
                 output_msg = "Mã rớt về vùng quá bán, Ngành đang ổn định -> Điểm MUA BẮT ĐÁY tuyệt vời."
                 bg_class = "bg-buy"
-            elif current_sector_rsi > 60:
-                signal = "KHÔNG NÊN MUA"
-                output_msg = "Ngành đang bay cao uptrend nhưng mã này cắm đầu -> Có lỗi nội tại, KHÔNG MUA."
+            elif current_sector_rsi > 65:
+                signal = "KHOAN HÃY MUA"
+                output_msg = "Ngành đang bay cao (RSI > 65) nhưng mã này cắm đầu -> Có vấn đề nội bộ, KHOAN MUA."
                 bg_class = "bg-sell"
                 
         # KIỂM TRA BÁN CHỐT LỜI
-        elif current_price > current_ma_val and current_rsi > 70:
-            if current_sector_rsi > 60:
+        elif current_price > current_ma_val:
+            if current_rsi > 70 and current_sector_rsi > 65:
                 signal = "KHOAN BÁN"
-                output_msg = "Mã quá mua nhưng sóng Ngành cũng đang siêu hưng phấn -> Tiếp tục GỒNG LÃI."
+                output_msg = "Mã quá mua nhưng sóng Ngành đang rất mạnh (RSI > 65) -> KHOAN BÁN để bắt trọn sóng."
                 bg_class = "bg-buy" 
-            elif 40 <= current_sector_rsi <= 60:
+            elif current_rsi > 70 and 35 <= current_sector_rsi <= 65:
                 signal = "BÁN BÌNH THƯỜNG"
                 output_msg = "Mã chạm đỉnh ngắn hạn, sóng Ngành bình thường -> BÁN CHỐT LỜI an toàn."
                 bg_class = "bg-sell"
-            elif current_sector_rsi < 40:
-                signal = "BÁN NGAY LẬP TỨC"
-                output_msg = "Ngành đang sụp mà mã này lại rướn lên -> BÁN NGAY giữ lợi nhuận kẻo sập theo."
+            elif current_rsi >= 65 and current_sector_rsi < 35:
+                signal = "CHỐT LỜI SỚM"
+                output_msg = "Ngành đang Downtrend (RSI < 35) -> Hạ tiêu chuẩn, CHỐT LỜI SỚM khi RSI mã chớm đạt 65."
                 bg_class = "bg-sell"
 
         st.session_state['results'] = {
@@ -485,10 +478,10 @@ if st.session_state.get('analysis_done', False):
             
         with col_m2:
             sec_rsi = res['current_sector_rsi']
-            if sec_rsi <= 40:
+            if sec_rsi < 35:
                 trend_val = "Downtrend"
                 trend_class = "m-sub-down"
-            elif sec_rsi > 60:
+            elif sec_rsi > 65:
                 trend_val = "Uptrend"
                 trend_class = "m-sub-up"
             else:
