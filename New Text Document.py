@@ -68,8 +68,9 @@ st.markdown("""
     .bt-label { color: #B0BEC5; font-size: 0.95rem; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; font-weight: bold; }
     .bt-val { font-size: 2.8rem; font-weight: 900; line-height: 1.1; margin-bottom: 5px; }
     .bt-note { font-size: 0.9rem; color: #90A4AE; margin-top: 5px; margin-bottom: 12px;}
-    .bt-hold { font-size: 0.9rem; color: #FFF; background-color: rgba(255,255,255,0.08); border: 1px solid #455A64; padding: 6px 15px; border-radius: 20px; display: inline-block; font-weight: 500;}
-    .bt-divider { width: 1px; background-color: #546E7A; height: 100px; margin: 0 20px; opacity: 0.5; }
+    .bt-hold { font-size: 0.85rem; color: #FFF; background-color: rgba(0,230,118,0.1); border: 1px solid rgba(0,230,118,0.3); padding: 4px 12px; border-radius: 20px; display: inline-block; font-weight: 500; margin: 3px;}
+    .bt-hold-sl { font-size: 0.85rem; color: #FFF; background-color: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.3); padding: 4px 12px; border-radius: 20px; display: inline-block; font-weight: 500; margin: 3px;}
+    .bt-divider { width: 1px; background-color: #546E7A; height: 130px; margin: 0 20px; opacity: 0.5; }
     .opt-badge { background-color: #00E5FF; color: #000; padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 900; margin-left: 8px; vertical-align: middle; box-shadow: 0 0 10px rgba(0, 229, 255, 0.4); letter-spacing: 0.5px;}
 
     /* Khối Thẻ Chỉ số Mới Cân Bằng */
@@ -143,7 +144,12 @@ def run_state_machine_simulation(close_arr, buy_triggers, sell_triggers, sl_val)
     in_trade = False
     entry_price = 0.0
     cum_ret = 1.0
-    hold_days_list = []
+    
+    # Biến theo dõi mới
+    tp_hold_days_list = [] # Số ngày gồng cho lệnh chốt LỜI
+    sl_hold_days_list = [] # Số ngày gồng cho lệnh cắt LỖ
+    total_trades = 0       # Tổng số lệnh đã đặt
+    sl_trades = 0          # Số lệnh dính Stoploss
     current_hold = 0
 
     for i in range(1, len(close_arr)):
@@ -159,12 +165,16 @@ def run_state_machine_simulation(close_arr, buy_triggers, sell_triggers, sl_val)
             if sl_val > 0 and (close_arr[i] - entry_price) / entry_price <= -sl_val:
                 cum_ret *= (1 - sl_val)
                 in_trade = False
+                sl_hold_days_list.append(current_hold) # Lưu vào danh sách cắt lỗ
+                total_trades += 1
+                sl_trades += 1
                 current_hold = 0
             # 2. Kiểm tra điều kiện Chốt lời
             elif sell_triggers[i-1]:
                 trade_ret = (close_arr[i] - entry_price) / entry_price
                 cum_ret *= (1 + trade_ret)
-                hold_days_list.append(current_hold) # Chỉ ghi nhận ngày nắm giữ cho lệnh win
+                tp_hold_days_list.append(current_hold) # Lưu vào danh sách chốt lời
+                total_trades += 1
                 in_trade = False
                 current_hold = 0
 
@@ -174,8 +184,13 @@ def run_state_machine_simulation(close_arr, buy_triggers, sell_triggers, sl_val)
         cum_ret *= (1 + trade_ret)
 
     total_return = cum_ret - 1
-    avg_hold = np.mean(hold_days_list) if len(hold_days_list) > 0 else 0
-    return total_return, avg_hold
+    
+    # Tính toán các chỉ số trung bình
+    avg_tp_hold = np.mean(tp_hold_days_list) if len(tp_hold_days_list) > 0 else 0
+    avg_sl_hold = np.mean(sl_hold_days_list) if len(sl_hold_days_list) > 0 else 0
+    sl_rate = (sl_trades / total_trades * 100) if total_trades > 0 else 0.0
+    
+    return total_return, avg_tp_hold, avg_sl_hold, sl_rate
 
 def optimize_ma_sl_advanced(df, user_sl, sector_rsi_series):
     close_arr = df['Close'].values
@@ -189,7 +204,10 @@ def optimize_ma_sl_advanced(df, user_sl, sector_rsi_series):
     best_ma_idx = 5
     best_sl = 0.03
     max_cum_return = -np.inf
-    best_avg_hold = 0
+    
+    best_avg_tp_hold = 0
+    best_avg_sl_hold = 0
+    best_sl_rate = 0.0
     
     # Quét tất cả các MA
     for w in ma_windows:
@@ -201,12 +219,14 @@ def optimize_ma_sl_advanced(df, user_sl, sector_rsi_series):
         sell_triggers = (close_arr > ma_line) & (rsi_arr > 70) & (sec_rsi_arr <= 60)
         
         for sl in sl_levels:
-            ret, hold = run_state_machine_simulation(close_arr, buy_triggers, sell_triggers, sl)
+            ret, tp_hold, sl_hold, sl_rate = run_state_machine_simulation(close_arr, buy_triggers, sell_triggers, sl)
             if ret > max_cum_return:
                 max_cum_return = ret
                 best_ma_idx = w
                 best_sl = sl
-                best_avg_hold = hold
+                best_avg_tp_hold = tp_hold
+                best_avg_sl_hold = sl_hold
+                best_sl_rate = sl_rate
 
     # Tính cho User
     opt_ma_series = df['Close'].rolling(best_ma_idx).mean()
@@ -215,7 +235,7 @@ def optimize_ma_sl_advanced(df, user_sl, sector_rsi_series):
     sell_triggers_best = (close_arr > ma_line_best) & (rsi_arr > 70) & (sec_rsi_arr <= 60)
     
     user_sl_decimal = float(user_sl) / 100.0
-    user_ret, user_avg_hold = run_state_machine_simulation(close_arr, buy_triggers_best, sell_triggers_best, user_sl_decimal)
+    user_ret, user_avg_tp_hold, user_avg_sl_hold, user_sl_rate = run_state_machine_simulation(close_arr, buy_triggers_best, sell_triggers_best, user_sl_decimal)
     
     try: days_total = (df.index[-1] - df.index[0]).days
     except: days_total = len(df)
@@ -224,7 +244,7 @@ def optimize_ma_sl_advanced(df, user_sl, sector_rsi_series):
     best_ann_ret = max_cum_return / years
     user_ann_ret = user_ret / years
     
-    return best_ma_idx, best_sl * 100, best_ann_ret * 100, user_ann_ret * 100, best_avg_hold, user_avg_hold, opt_ma_series
+    return best_ma_idx, best_sl * 100, best_ann_ret * 100, user_ann_ret * 100, best_avg_tp_hold, user_avg_tp_hold, best_avg_sl_hold, user_avg_sl_hold, best_sl_rate, user_sl_rate, opt_ma_series
 
 # --- 4. FORM NHẬP LIỆU ---
 col_pad1, col_main, col_pad2 = st.columns([1, 2, 1])
@@ -338,7 +358,7 @@ if submit_btn:
             
         df_main['RSI'] = calculate_rsi(df_main['Close'])
         
-        opt_ma, opt_sl, best_ret, user_ret, best_avg_hold_days, user_avg_hold_days, ma_series = optimize_ma_sl_advanced(df_main, sl_input, sector_rsi_series)
+        opt_ma, opt_sl, best_ret, user_ret, best_avg_tp_hold, user_avg_tp_hold, best_avg_sl_hold, user_avg_sl_hold, best_sl_rate, user_sl_rate, ma_series = optimize_ma_sl_advanced(df_main, sl_input, sector_rsi_series)
         df_main['MA_Opt'] = ma_series
         
         current_price = df_main['Close'].iloc[-1]
@@ -383,7 +403,9 @@ if submit_btn:
         st.session_state['results'] = {
             'signal': signal, 'output_msg': output_msg, 'bg_class': bg_class,
             'user_ret': user_ret, 'best_ret': best_ret, 'sl_input': sl_input, 'opt_sl': opt_sl,
-            'best_avg_hold_days': best_avg_hold_days, 'user_avg_hold_days': user_avg_hold_days, 
+            'best_avg_tp_hold': best_avg_tp_hold, 'user_avg_tp_hold': user_avg_tp_hold, 
+            'best_avg_sl_hold': best_avg_sl_hold, 'user_avg_sl_hold': user_avg_sl_hold,
+            'best_sl_rate': best_sl_rate, 'user_sl_rate': user_sl_rate,
             'current_price': current_price, 'current_rsi': current_rsi,
             'opt_ma': opt_ma, 'current_ma_val': current_ma_val, 'sector_name': sector_name,
             'current_sector_rsi': current_sector_rsi, 'df_main': df_main
@@ -420,14 +442,18 @@ if st.session_state.get('analysis_done', False):
                 <div class='bt-label'>CHIẾN LƯỢC CỦA BẠN (SL {sl_text_user})</div>
                 <div class='bt-val' style='color:{u_color}'>{res['user_ret']:+.1f}%<span style='font-size:1.4rem'>/năm</span></div>
                 <div class='bt-note'>Hiệu quả lợi nhuận trung bình</div>
-                <div class='bt-hold'>⏳ Nắm giữ TB: {res['user_avg_hold_days']:.0f} ngày (Lệnh chốt lời)</div>
+                <div class='bt-hold'>✅ Lời: {res['user_avg_tp_hold']:.0f} ngày</div>
+                <div class='bt-hold-sl'>❌ Lỗ: {res['user_avg_sl_hold']:.0f} ngày</div>
+                <div class='bt-note' style='margin-top:8px;'>Tỷ lệ chạm Cắt lỗ: <b>{res['user_sl_rate']:.1f}%</b></div>
             </div>
             <div class='bt-divider'></div>
             <div class='bt-col'>
                 <div class='bt-label'>TỐI ƯU NHẤT <span class='opt-badge'>RECOMMENDED</span></div>
                 <div class='bt-val' style='color:{o_color}'>{res['best_ret']:+.1f}%<span style='font-size:1.4rem'>/năm</span></div>
                 <div class='bt-note'>Với mức Stoploss <b>{sl_text_opt}</b></div>
-                <div class='bt-hold'>⏳ Nắm giữ TB: {res['best_avg_hold_days']:.0f} ngày (Lệnh chốt lời)</div>
+                <div class='bt-hold'>✅ Lời: {res['best_avg_tp_hold']:.0f} ngày</div>
+                <div class='bt-hold-sl'>❌ Lỗ: {res['best_avg_sl_hold']:.0f} ngày</div>
+                <div class='bt-note' style='margin-top:8px;'>Tỷ lệ chạm Cắt lỗ: <b>{res['best_sl_rate']:.1f}%</b></div>
             </div>
         </div>
         """, unsafe_allow_html=True)
