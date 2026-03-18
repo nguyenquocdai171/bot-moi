@@ -72,7 +72,7 @@ st.markdown("""
     .bt-divider { width: 1px; background-color: #546E7A; height: 100px; margin: 0 20px; opacity: 0.5; }
     .opt-badge { background-color: #00E5FF; color: #000; padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 900; margin-left: 8px; vertical-align: middle; box-shadow: 0 0 10px rgba(0, 229, 255, 0.4); letter-spacing: 0.5px;}
 
-    /* Khối Thẻ Chỉ số Mới Cân Bằng (Fixed Height & Flexbox) */
+    /* Khối Thẻ Chỉ số Mới Cân Bằng */
     .metric-card {
         background-color: #1E272C; border: 1px solid #37474F; border-radius: 12px;
         padding: 15px 15px; text-align: center; box-shadow: 0 6px 12px rgba(0,0,0,0.3);
@@ -138,55 +138,93 @@ def calculate_rsi(prices, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def run_simulation(strategy_returns, sl_level):
-    if sl_level == 0:
-        return np.prod(1 + strategy_returns) - 1
-    adj_ret = np.where(strategy_returns < -sl_level, -sl_level, strategy_returns)
-    return np.prod(1 + adj_ret) - 1
+# Hàm Backtest Đẳng cấp mới: Chạy máy trạng thái (State Machine) đúng 100% luật RSI & Ngành
+def run_state_machine_simulation(close_arr, buy_triggers, sell_triggers, sl_val):
+    in_trade = False
+    entry_price = 0.0
+    cum_ret = 1.0
+    hold_days_list = []
+    current_hold = 0
 
-def optimize_ma_sl(df, user_sl):
+    for i in range(1, len(close_arr)):
+        if not in_trade:
+            # Tín hiệu mua từ phiên hôm qua -> Khớp lệnh phiên nay
+            if buy_triggers[i-1]:
+                in_trade = True
+                entry_price = close_arr[i]
+                current_hold = 1
+        else:
+            current_hold += 1
+            # 1. Kiểm tra Stoploss (Cắt lỗ ưu tiên hàng đầu)
+            if sl_val > 0 and (close_arr[i] - entry_price) / entry_price <= -sl_val:
+                cum_ret *= (1 - sl_val)
+                in_trade = False
+                current_hold = 0
+            # 2. Kiểm tra điều kiện Chốt lời
+            elif sell_triggers[i-1]:
+                trade_ret = (close_arr[i] - entry_price) / entry_price
+                cum_ret *= (1 + trade_ret)
+                hold_days_list.append(current_hold) # Chỉ tính hold days cho các lệnh chốt lời
+                in_trade = False
+                current_hold = 0
+
+    # Tất toán lệnh cuối cùng nếu đang giữ khi hết dữ liệu
+    if in_trade:
+        trade_ret = (close_arr[-1] - entry_price) / entry_price
+        cum_ret *= (1 + trade_ret)
+
+    total_return = cum_ret - 1
+    avg_hold = np.mean(hold_days_list) if len(hold_days_list) > 0 else 0
+    return total_return, avg_hold
+
+def optimize_ma_sl_advanced(df, user_sl, sector_rsi_series):
     close_arr = df['Close'].values
-    returns = np.diff(close_arr) / close_arr[:-1]
-    returns = np.insert(returns, 0, 0)
+    rsi_arr = df['RSI'].values
+    # Đồng bộ dữ liệu RSI Ngành khớp với chiều dài của df
+    sec_rsi_arr = sector_rsi_series.reindex(df.index).ffill().values
     
     ma_windows = np.arange(5, 210, 5)
-    ma_matrix = np.array([df['Close'].rolling(w).mean().values for w in ma_windows])
+    sl_levels = np.arange(0.03, 0.105, 0.005)
     
-    signals = (close_arr > ma_matrix).astype(int)
-    signals = np.roll(signals, 1, axis=1)
-    signals[:, 0] = 0
-    strategy_returns = signals * returns
+    best_ma_idx = 5
+    best_sl = 0.03
+    max_cum_return = -np.inf
+    best_avg_hold = 0
     
-    sl_levels = np.arange(0.0, 0.101, 0.001)
-    best_ma_idx, best_sl, max_cum_return = 0, 0.0, -np.inf
-
-    for i, ma_ret in enumerate(strategy_returns):
+    # Quét tát cả MA để tìm thông số tối ưu nhất
+    for w in ma_windows:
+        ma_line = df['Close'].rolling(w).mean().values
+        
+        # MUA: Giá < MA & RSI Mã < 30 & RSI Ngành nằm trong khoảng (40, 60]
+        buy_triggers = (close_arr < ma_line) & (rsi_arr < 30) & (sec_rsi_arr > 40) & (sec_rsi_arr <= 60)
+        # BÁN: Giá > MA & RSI Mã > 70 & RSI Ngành <= 60
+        sell_triggers = (close_arr > ma_line) & (rsi_arr > 70) & (sec_rsi_arr <= 60)
+        
         for sl in sl_levels:
-            cum_return = run_simulation(ma_ret, sl)
-            if cum_return > max_cum_return:
-                max_cum_return = cum_return
-                best_ma_idx = i
+            ret, hold = run_state_machine_simulation(close_arr, buy_triggers, sell_triggers, sl)
+            if ret > max_cum_return:
+                max_cum_return = ret
+                best_ma_idx = w
                 best_sl = sl
+                best_avg_hold = hold
 
-    opt_ma_window = ma_windows[best_ma_idx]
-    opt_ma_series = df['Close'].rolling(opt_ma_window).mean()
+    # Tính toán lại cho SL của riêng User với đường MA tốt nhất
+    opt_ma_series = df['Close'].rolling(best_ma_idx).mean()
+    ma_line_best = opt_ma_series.values
+    buy_triggers_best = (close_arr < ma_line_best) & (rsi_arr < 30) & (sec_rsi_arr > 40) & (sec_rsi_arr <= 60)
+    sell_triggers_best = (close_arr > ma_line_best) & (rsi_arr > 70) & (sec_rsi_arr <= 60)
     
     user_sl_decimal = float(user_sl) / 100.0
-    user_cum_return = run_simulation(strategy_returns[best_ma_idx], user_sl_decimal)
-    
-    best_sig = signals[best_ma_idx]
-    trades = np.sum(np.diff(np.insert(best_sig, 0, 0)) == 1)
-    total_days_held = np.sum(best_sig)
-    avg_hold_days = total_days_held / trades if trades > 0 else 0
+    user_ret, user_avg_hold = run_state_machine_simulation(close_arr, buy_triggers_best, sell_triggers_best, user_sl_decimal)
     
     try: days_total = (df.index[-1] - df.index[0]).days
     except: days_total = len(df)
         
     years = days_total / 365.25 if days_total > 0 else 1
     best_ann_ret = max_cum_return / years
-    user_ann_ret = user_cum_return / years
+    user_ann_ret = user_ret / years
     
-    return opt_ma_window, best_sl * 100, best_ann_ret * 100, user_ann_ret * 100, avg_hold_days, opt_ma_series
+    return best_ma_idx, best_sl * 100, best_ann_ret * 100, user_ann_ret * 100, best_avg_hold, user_avg_hold, opt_ma_series
 
 # --- 4. FORM NHẬP LIỆU ---
 col_pad1, col_main, col_pad2 = st.columns([1, 2, 1])
@@ -197,7 +235,7 @@ with col_main:
         with f_col1:
             ticker_input = st.text_input("Mã cổ phiếu:", placeholder="VD: HPG, CEO...").upper().strip()
         with f_col2:
-            sl_input = st.number_input("SL mong muốn (%):", min_value=0.0, max_value=20.0, value=7.0, step=0.1, format="%.1f")
+            sl_input = st.number_input("SL mong muốn (%):", min_value=3.0, max_value=10.0, value=7.0, step=0.5, format="%.1f")
         
         submit_btn = st.form_submit_button("🚀 PHÂN TÍCH & SIÊU TỐI ƯU", use_container_width=True)
 
@@ -236,7 +274,6 @@ if submit_btn:
     peers = db_nganh[db_nganh['Sector'] == sector_name]['Ticker'].tolist()
     
     with st.spinner(f"🔍 Đang thu thập dữ liệu ngành '{sector_name}' ({len(peers)} mã)..."):
-        # Dò tìm thông minh: Cả đuôi .VN (HOSE) và .HN (HNX/UPCOM)
         main_vn = f"{ticker_input}.VN"
         main_hn = f"{ticker_input}.HN"
         yf_tickers = list(set([f"{t}.VN" for t in peers] + [main_vn, main_hn]))
@@ -247,7 +284,6 @@ if submit_btn:
             st.error("❌ Mạng lỗi hoặc không tải được dữ liệu.")
             st.stop()
             
-        # Xử lý MultiIndex an toàn
         if isinstance(data.columns, pd.MultiIndex):
             close_data = data['Close']
         else:
@@ -256,7 +292,6 @@ if submit_btn:
             else:
                 close_data = pd.DataFrame()
             
-        # Kiểm tra mã chính xác trên YF
         main_ticker_yf = None
         for candidate in [main_vn, main_hn]:
             if candidate in close_data.columns and not close_data[candidate].dropna().empty:
@@ -264,81 +299,78 @@ if submit_btn:
                 break
                 
         if not main_ticker_yf:
-            st.error(f"❌ Mã {ticker_input} hiện không có dữ liệu trên Yahoo Finance (Thường gặp ở mã chưa niêm yết hoặc dữ liệu trống).")
+            st.error(f"❌ Mã {ticker_input} hiện không có dữ liệu trên Yahoo Finance.")
             st.stop()
 
-        # Tính RSI Ngành (Bỏ qua các mã trống)
+        # Tính RSI Ngành
         rsi_df = pd.DataFrame(index=close_data.index)
         for t in close_data.columns:
-            # Lọc bỏ các cột NaN hoàn toàn
             if not close_data[t].dropna().empty:
                 rsi_df[t] = calculate_rsi(close_data[t])
             
         sector_rsi_series = rsi_df.mean(axis=1).dropna()
         current_sector_rsi = sector_rsi_series.iloc[-1] if not sector_rsi_series.empty else 50.0
         
-        if current_sector_rsi < 35: sector_trend = "Downtrend"
-        elif current_sector_rsi > 65: sector_trend = "Uptrend"
-        else: sector_trend = "Bình thường"
-            
         # Trích xuất dữ liệu Cổ phiếu chính
         df_main = pd.DataFrame({'Close': close_data[main_ticker_yf].dropna()})
         
-        # Bẫy lỗi nếu dữ liệu lịch sử quá ngắn
         if len(df_main) < 30:
-            st.error(f"❌ Mã {ticker_input} có quá ít lịch sử giao dịch ({len(df_main)} ngày) để áp dụng siêu tối ưu. Vui lòng chọn mã khác.")
+            st.error(f"❌ Mã {ticker_input} có quá ít lịch sử giao dịch.")
             st.stop()
             
         df_main['RSI'] = calculate_rsi(df_main['Close'])
         
-        opt_ma, opt_sl, best_ret, user_ret, avg_hold_days, ma_series = optimize_ma_sl(df_main, sl_input)
+        # Chạy thuật toán Siêu Tối Ưu phiên bản Mới (Truyền Sector RSI vào để Backtest)
+        opt_ma, opt_sl, best_ret, user_ret, best_avg_hold_days, user_avg_hold_days, ma_series = optimize_ma_sl_advanced(df_main, sl_input, sector_rsi_series)
         df_main['MA_Opt'] = ma_series
         
         current_price = df_main['Close'].iloc[-1]
         current_rsi = df_main['RSI'].iloc[-1]
         current_ma_val = ma_series.iloc[-1]
         
-        # --- MA TRẬN TÍN HIỆU LÕI ---
+        # --- MA TRẬN TÍN HIỆU LÕI (CẬP NHẬT ĐÚNG THEO YÊU CẦU CỦA USER) ---
         signal = "QUAN SÁT (WAIT)"
-        output_msg = f"Giá dưới MA{opt_ma} (Xu hướng giảm), chờ RSI < 30." if current_price < current_ma_val else f"Giá trên MA{opt_ma} (Xu hướng tăng), chờ RSI > 70."
+        output_msg = f"Giá và RSI chưa đạt điều kiện lý tưởng. Tiếp tục theo dõi."
         bg_class = "bg-neutral"
         
+        # KIỂM TRA ĐIỀU KIỆN MUA
         if current_price < current_ma_val and current_rsi < 30:
-            if sector_trend == "Uptrend":
-                signal = "KHÔNG MUA"
-                output_msg = "Ngành tăng nhưng mã rớt thảm. Có rủi ro nội tại -> KHÔNG MUA"
+            if current_sector_rsi <= 40:
+                signal = "KHOAN MUA"
+                output_msg = "Mã quá bán nhưng Ngành đang downtrend rơi rớt -> KHOAN MUA, hãy chờ ngành ổn định lại."
                 bg_class = "bg-warn"
-            elif sector_trend == "Downtrend":
-                signal = "CÂN NHẮC MUA"
-                output_msg = "Có thể Mua bắt đáy, nhưng Ngành đang rớt -> Rủi ro cao"
-                bg_class = "bg-warn"
-            else:
-                signal = "MUA NGAY"
-                output_msg = "Thỏa mãn điều kiện Giá, RSI và Ngành bình thường -> MUA"
+            elif 40 < current_sector_rsi <= 60:
+                signal = "MUA BÌNH THƯỜNG"
+                output_msg = "Giá < MA, RSI < 30, Ngành ổn định -> Điểm MUA BẮT ĐÁY tuyệt vời."
                 bg_class = "bg-buy"
-                
-        elif current_price > current_ma_val and current_rsi > 70:
-            if sector_trend == "Uptrend":
-                signal = "CÂN NHẮC BÁN"
-                output_msg = "Có thể Bán, nhưng Ngành đang tăng mạnh -> Coi chừng chốt non"
-                bg_class = "bg-warn"
-            elif sector_trend == "Downtrend":
-                signal = "BÁN NGAY"
-                output_msg = "Ngôi sao đi ngược thị trường. BÁN NGAY để bảo toàn lực lượng"
+            elif current_sector_rsi > 60:
+                signal = "KHÔNG NÊN MUA"
+                output_msg = "Ngành đang bay cao nhưng mã này lại cắm đầu. Có rủi ro nội tại -> KHÔNG MUA."
                 bg_class = "bg-sell"
-            else:
-                signal = "BÁN NGAY"
-                output_msg = "Thỏa mãn điều kiện Giá, RSI và Ngành bình thường -> BÁN NGAY"
+                
+        # KIỂM TRA ĐIỀU KIỆN BÁN
+        elif current_price > current_ma_val and current_rsi > 70:
+            if current_sector_rsi > 60:
+                signal = "KHOAN BÁN"
+                output_msg = "Mã quá mua nhưng Ngành cũng đang siêu hưng phấn -> KHOAN BÁN, tiếp tục Gồng Lãi."
+                bg_class = "bg-buy" # Xanh để gồng
+            elif 40 <= current_sector_rsi <= 60:
+                signal = "BÁN BÌNH THƯỜNG"
+                output_msg = "Mã chạm đỉnh ngắn hạn, Ngành bình thường -> BÁN CHỐT LỜI bảo toàn vốn."
+                bg_class = "bg-sell"
+            elif current_sector_rsi < 40:
+                signal = "BÁN NGAY LẬP TỨC"
+                output_msg = "Ngành đang sụp mà mã này lại kéo rướn lên -> BÁN NGAY giữ lợi nhuận kẻo sập theo."
                 bg_class = "bg-sell"
 
         # LƯU VÀO SESSION STATE ĐỂ RENDER
         st.session_state['results'] = {
             'signal': signal, 'output_msg': output_msg, 'bg_class': bg_class,
             'user_ret': user_ret, 'best_ret': best_ret, 'sl_input': sl_input, 'opt_sl': opt_sl,
-            'avg_hold_days': avg_hold_days, 'current_price': current_price, 'current_rsi': current_rsi,
+            'best_avg_hold_days': best_avg_hold_days, 'user_avg_hold_days': user_avg_hold_days, 
+            'current_price': current_price, 'current_rsi': current_rsi,
             'opt_ma': opt_ma, 'current_ma_val': current_ma_val, 'sector_name': sector_name,
-            'sector_trend': sector_trend, 'current_sector_rsi': current_sector_rsi,
-            'df_main': df_main
+            'current_sector_rsi': current_sector_rsi, 'df_main': df_main
         }
         st.session_state['analysis_done'] = True
 
@@ -363,8 +395,8 @@ if st.session_state.get('analysis_done', False):
         # 6.2 Box Backtest
         u_color = "#00E676" if res['user_ret'] > 0 else "#FF5252"
         o_color = "#00E5FF" 
-        sl_text_user = f"{res['sl_input']}%" if res['sl_input'] > 0 else "OFF"
-        sl_text_opt = f"{res['opt_sl']:.1f}%" if res['opt_sl'] > 0 else "OFF"
+        sl_text_user = f"{res['sl_input']:.1f}%"
+        sl_text_opt = f"{res['opt_sl']:.1f}%"
         
         st.markdown(f"""
         <div class='bt-container'>
@@ -372,14 +404,14 @@ if st.session_state.get('analysis_done', False):
                 <div class='bt-label'>CHIẾN LƯỢC CỦA BẠN (SL {sl_text_user})</div>
                 <div class='bt-val' style='color:{u_color}'>{res['user_ret']:+.1f}%<span style='font-size:1.4rem'>/năm</span></div>
                 <div class='bt-note'>Hiệu quả lợi nhuận trung bình</div>
-                <div class='bt-hold'>⏳ Nắm giữ TB: {res['avg_hold_days']:.0f} ngày</div>
+                <div class='bt-hold'>⏳ Nắm giữ TB: {res['user_avg_hold_days']:.0f} ngày (Lệnh chốt lời)</div>
             </div>
             <div class='bt-divider'></div>
             <div class='bt-col'>
                 <div class='bt-label'>TỐI ƯU NHẤT <span class='opt-badge'>RECOMMENDED</span></div>
                 <div class='bt-val' style='color:{o_color}'>{res['best_ret']:+.1f}%<span style='font-size:1.4rem'>/năm</span></div>
                 <div class='bt-note'>Với mức Stoploss <b>{sl_text_opt}</b></div>
-                <div class='bt-hold'>⏳ Nắm giữ TB: {res['avg_hold_days']:.0f} ngày</div>
+                <div class='bt-hold'>⏳ Nắm giữ TB: {res['best_avg_hold_days']:.0f} ngày (Lệnh chốt lời)</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -410,9 +442,19 @@ if st.session_state.get('analysis_done', False):
             """, unsafe_allow_html=True)
             
         with col_m2:
-            trend_val = res['sector_trend']
-            trend_class = "m-sub-down" if trend_val=="Downtrend" else ("m-sub-up" if trend_val=="Uptrend" else "m-sub-neu")
-            trend_icon = "📉" if trend_val=="Downtrend" else ("📈" if trend_val=="Uptrend" else "➖")
+            sec_rsi = res['current_sector_rsi']
+            if sec_rsi <= 40:
+                trend_val = "Downtrend"
+                trend_class = "m-sub-down"
+                trend_icon = "📉"
+            elif sec_rsi > 60:
+                trend_val = "Uptrend"
+                trend_class = "m-sub-up"
+                trend_icon = "📈"
+            else:
+                trend_val = "Bình thường"
+                trend_class = "m-sub-neu"
+                trend_icon = "➖"
             
             st.markdown(f"""
             <div class='metric-card'>
@@ -425,7 +467,7 @@ if st.session_state.get('analysis_done', False):
                 <div class='m-section'>
                     <div class='m-label'>🏢 XU HƯỚNG NGÀNH ({res['sector_name']})</div>
                     <div class='m-val-text'>{trend_val}</div>
-                    <div class='{trend_class}'>RSI Ngành: {res['current_sector_rsi']:.1f}</div>
+                    <div class='{trend_class}'>RSI Ngành: {sec_rsi:.1f}</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
