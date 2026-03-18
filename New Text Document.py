@@ -271,12 +271,20 @@ if submit_btn:
         st.stop()
         
     sector_name = ticker_info.iloc[0]['Sector']
-    peers = db_nganh[db_nganh['Sector'] == sector_name]['Ticker'].tolist()
     
-    with st.spinner(f"🔍 Đang thu thập dữ liệu ngành '{sector_name}' ({len(peers)} mã)..."):
+    # CHỈ LẤY CÁC MÃ HOSE ĐỂ TÍNH RSI NGÀNH CHO CHUẨN XÁC
+    if 'Exchange' in db_nganh.columns:
+        peers_hose = db_nganh[(db_nganh['Sector'] == sector_name) & (db_nganh['Exchange'] == 'HOSE')]['Ticker'].tolist()
+    else:
+        # Fallback nếu file thiếu cột Exchange
+        peers_hose = db_nganh[db_nganh['Sector'] == sector_name]['Ticker'].tolist()
+    
+    with st.spinner(f"🔍 Đang phân tích mã {ticker_input} và {len(peers_hose)} mã HOSE cùng ngành '{sector_name}'..."):
         main_vn = f"{ticker_input}.VN"
         main_hn = f"{ticker_input}.HN"
-        yf_tickers = list(set([f"{t}.VN" for t in peers] + [main_vn, main_hn]))
+        
+        # Gom mã cần tải: Mã người dùng nhập (cả VN và HN) + Các mã HOSE cùng ngành
+        yf_tickers = list(set([f"{t}.VN" for t in peers_hose] + [main_vn, main_hn]))
         
         data = yf.download(yf_tickers, period="3y", interval="1d", progress=False)
         
@@ -292,6 +300,7 @@ if submit_btn:
             else:
                 close_data = pd.DataFrame()
             
+        # Tìm mã hợp lệ trên Yahoo Finance
         main_ticker_yf = None
         for candidate in [main_vn, main_hn]:
             if candidate in close_data.columns and not close_data[candidate].dropna().empty:
@@ -302,13 +311,21 @@ if submit_btn:
             st.error(f"❌ Mã {ticker_input} hiện không có dữ liệu trên Yahoo Finance.")
             st.stop()
 
-        # Tính RSI Ngành
+        # Tính RSI cho tất cả các cột
         rsi_df = pd.DataFrame(index=close_data.index)
         for t in close_data.columns:
             if not close_data[t].dropna().empty:
                 rsi_df[t] = calculate_rsi(close_data[t])
             
-        sector_rsi_series = rsi_df.mean(axis=1).dropna()
+        # TÍNH TRUNG BÌNH RSI NGÀNH TỪ CÁC MÃ HOSE
+        hose_peer_cols = [f"{t}.VN" for t in peers_hose]
+        valid_hose_cols = [c for c in hose_peer_cols if c in rsi_df.columns]
+        
+        if valid_hose_cols:
+            sector_rsi_series = rsi_df[valid_hose_cols].mean(axis=1).dropna()
+        else:
+            sector_rsi_series = pd.Series(50.0, index=close_data.index)
+            
         current_sector_rsi = sector_rsi_series.iloc[-1] if not sector_rsi_series.empty else 50.0
         
         # Trích xuất dữ liệu Cổ phiếu chính
